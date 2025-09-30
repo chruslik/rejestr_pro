@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify # jsonify jest już importowany
 from flask_cors import CORS
 from supabase import create_client, Client
 import os
@@ -7,6 +7,14 @@ from dotenv import load_dotenv
 
 app = Flask(__name__)
 CORS(app)
+
+# ======================================================================
+# POPRAWKA KODOWANIA UTF-8 DLA POLSKICH ZNAKÓW
+# ======================================================================
+app.config['JSON_AS_ASCII'] = False 
+app.config['JSONIFY_MIMETYPE'] = 'application/json; charset=utf-8' 
+# ======================================================================
+
 load_dotenv()
 
 # Klucze Supabase z Environment
