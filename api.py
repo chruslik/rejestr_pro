@@ -64,7 +64,7 @@ def get_naprawy():
     Pobiera wszystkie naprawy, łącząc dane z tabel klienci i maszyny.
     """
     try:
-        zapytanie = """
+        zapytanie = r"""
             *,
             klienci!naprawy_klient_id_fkey(klient_id, nazwa),
             maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
