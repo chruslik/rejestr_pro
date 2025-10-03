@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response # Dodano make_response
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from supabase import create_client, Client
 import os
@@ -11,9 +11,7 @@ CORS(app)
 # ======================================================================
 # KONFIGURACJA DLA UTF-8
 # ======================================================================
-# 1. Wyłącza konwersję na ASCII w jsonify (powinien działać, ale dla pewności zostawiamy)
 app.config['JSON_AS_ASCII'] = False 
-# 2. Ustawia domyślny charset (też może być nadpisywany przez serwer)
 app.config['JSONIFY_MIMETYPE'] = 'application/json; charset=utf-8' 
 # ======================================================================
 
@@ -32,12 +30,10 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ======================================================================
-# GLOBALNA KOREKTA KODOWANIA (OSTATECZNA PRÓBA)
-# Wymusza nagłówek i ponowne kodowanie danych, aby pozbyć się \uXXXX.
+# GLOBALNA KOREKTA KODOWANIA
 # ======================================================================
 @app.after_request
 def add_charset_header(response):
-    # Używamy r""" """ dla bezpiecznego komentarza wieloliniowego
     r"""
     Dodaje lub poprawia nagłówek Content-Type,
     gwarantując, że zawsze zawiera charset=utf-8 dla odpowiedzi JSON.
@@ -58,6 +54,34 @@ def index():
     return {"status": "ok", "message": "API działa"}
 
 # ----------------------------------------------------------------------
+# ENDPOINTY NAPRAW (CRUD)
+# ----------------------------------------------------------------------
+
+def _formatuj_naprawe(n):
+    """Pomocnicza funkcja do formatowania pojedynczej naprawy."""
+    klient_dane = n.get("klienci", {})
+    maszyna_dane = n.get("maszyny", {})
+    
+    if isinstance(klient_dane, list) and klient_dane:
+        klient_dane = klient_dane[0]
+    if isinstance(maszyna_dane, list) and maszyna_dane:
+        maszyna_dane = maszyna_dane[0]
+
+    return {
+        "id": n["id"],
+        "klient_id": n["klient_id"],
+        "klient_nazwa": klient_dane.get("nazwa"),
+        "posrednik_id": n.get("posrednik_id"),
+        "marka": maszyna_dane.get("marka"),
+        "klasa": maszyna_dane.get("klasa"),
+        "ns": n.get("maszyna_ns"),
+        "status": n["status"],
+        "data_przyjecia": n["data_przyjecia"],
+        "data_zakonczenia": n.get("data_zakonczenia"),
+        "opis_usterki": n.get("opis_usterki"),
+        "opis_naprawy": n.get("opis_naprawy"),
+        "rozliczone": n.get("rozliczone", False)
+    }
 
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
@@ -74,38 +98,37 @@ def get_naprawy():
         naprawy_resp = supabase.table("naprawy").select(zapytanie).order("id", desc=True).execute()
         naprawy = naprawy_resp.data
 
-        wynik = []
-        for n in naprawy:
-            klient_dane = n.get("klienci", {})
-            maszyna_dane = n.get("maszyny", {})
-            
-            if isinstance(klient_dane, list) and klient_dane:
-                klient_dane = klient_dane[0]
-            if isinstance(maszyna_dane, list) and maszyna_dane:
-                maszyna_dane = maszyna_dane[0]
-
-            wynik.append({
-                "id": n["id"],
-                "klient_id": n["klient_id"],
-                "klient_nazwa": klient_dane.get("nazwa"),
-                "posrednik_id": n.get("posrednik_id"),
-                "marka": maszyna_dane.get("marka"),
-                "klasa": maszyna_dane.get("klasa"),
-                "ns": n.get("maszyna_ns"),
-                "status": n["status"],
-                "data_przyjecia": n["data_przyjecia"],
-                "data_zakonczenia": n.get("data_zakonczenia"),
-                "opis_usterki": n.get("opis_usterki"),
-                "opis_naprawy": n.get("opis_naprawy"),
-                "rozliczone": n.get("rozliczone", False)
-            })
-
+        wynik = [_formatuj_naprawe(n) for n in naprawy]
         return jsonify(wynik)
     except Exception as e:
         print("Błąd w /naprawy (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
-# ----------------------------------------------------------------------
+@app.route("/naprawy/<int:naprawa_id>", methods=["GET"])
+def get_naprawa_by_id(naprawa_id):
+    """
+    Pobiera szczegóły jednej naprawy po ID, w tym dane klienta i maszyny.
+    """
+    try:
+        zapytanie = r"""
+            *,
+            klienci!naprawy_klient_id_fkey(klient_id, nazwa),
+            maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
+        """
+        
+        naprawa_resp = supabase.table("naprawy").select(zapytanie).eq("id", naprawa_id).single().execute()
+        
+        if naprawa_resp.data:
+            return jsonify(_formatuj_naprawe(naprawa_resp.data))
+        else:
+            return jsonify({"error": "Nie znaleziono naprawy"}), 404
+    except Exception as e:
+        # Sprawdzamy błąd, bo single() rzuca wyjątek przy braku wyniku
+        if "No rows returned from the query" in str(e):
+             return jsonify({"error": "Nie znaleziono naprawy"}), 404
+        print(f"Błąd w /naprawy/{naprawa_id} (GET):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
+
 
 @app.route("/naprawy", methods=["POST"])
 def dodaj_naprawe():
@@ -140,8 +163,6 @@ def dodaj_naprawe():
         print("Błąd w /naprawy (POST):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
-# ----------------------------------------------------------------------
-
 @app.route("/naprawy/<int:naprawa_id>", methods=["DELETE"])
 def delete_naprawa(naprawa_id):
     """Usuwa naprawę na podstawie ID."""
@@ -155,8 +176,6 @@ def delete_naprawa(naprawa_id):
     except Exception as e:
         print("Błąd w delete_naprawa:", e)
         return jsonify({"error": str(e)}), 500
-
-# ----------------------------------------------------------------------
 
 @app.route("/naprawy/<int:naprawa_id>", methods=["PUT"])
 def update_naprawa(naprawa_id):
@@ -197,7 +216,7 @@ def update_naprawa(naprawa_id):
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 # ----------------------------------------------------------------------
-# ZMIANY W OBRÓBCE MASZYN
+# ENDPOINTY MASZYN
 # ----------------------------------------------------------------------
 
 @app.route("/maszyny", methods=["GET"])
@@ -210,6 +229,21 @@ def get_maszyny():
         print("Błąd w get_maszyny:", e)
         return jsonify({"error": str(e)}), 500
 
+@app.route("/maszyny/<string:ns>", methods=["GET"])
+def get_maszyna_by_ns(ns):
+    """Pobiera szczegóły maszyny po numerze seryjnym (ns)."""
+    try:
+        maszyna_resp = supabase.table("maszyny").select("*").eq("ns", ns).single().execute()
+        
+        if maszyna_resp.data:
+            return jsonify(maszyna_resp.data)
+        else:
+            return jsonify({"error": "Nie znaleziono maszyny"}), 404
+    except Exception as e:
+        if "No rows returned from the query" in str(e):
+             return jsonify({"error": "Nie znaleziono maszyny"}), 404
+        print(f"Błąd w /maszyny/{ns} (GET):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 @app.route("/maszyny", methods=["POST"])
 def dodaj_lub_pobierz_maszyne():
@@ -250,7 +284,7 @@ def dodaj_lub_pobierz_maszyne():
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 # ----------------------------------------------------------------------
-# ZMIANY W OBRÓBCE KLIENTÓW
+# ENDPOINTY KLIENTÓW
 # ----------------------------------------------------------------------
 
 @app.route("/klienci", methods=["GET"])
@@ -262,6 +296,22 @@ def get_klienci():
     except Exception as e:
         print("Błąd w get_klienci:", e)
         return jsonify({"error": str(e)}), 500
+
+@app.route("/klienci/<string:klient_id>", methods=["GET"])
+def get_klient_by_id(klient_id):
+    """Pobiera szczegóły klienta po jego ID."""
+    try:
+        klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id).single().execute()
+        
+        if klient_resp.data:
+            return jsonify(klient_resp.data)
+        else:
+            return jsonify({"error": "Nie znaleziono klienta"}), 404
+    except Exception as e:
+        if "No rows returned from the query" in str(e):
+             return jsonify({"error": "Nie znaleziono klienta"}), 404
+        print(f"Błąd w /klienci/{klient_id} (GET):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 
 @app.route("/klienci", methods=["POST"])
@@ -302,12 +352,12 @@ def dodaj_klienta():
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 # ----------------------------------------------------------------------
-# ZMIANY W SŁOWNIKACH
+# SŁOWNIKI
 # ----------------------------------------------------------------------
 
 @app.route("/slowniki")
 def get_slowniki():
-    """Pobiera dane do słowników."""
+    r"""Pobiera dane do słowników (marki, klasy, usterki, klienci, ns)."""
     try:
         marki = supabase.table("maszyny").select("marka").execute()
         klasy = supabase.table("maszyny").select("klasa").execute()
