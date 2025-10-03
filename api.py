@@ -59,19 +59,15 @@ def index():
 
 def _formatuj_naprawe(n):
     """Pomocnicza funkcja do formatowania pojedynczej naprawy."""
-    klient_dane = n.get("klienci", {})
+    # UWAGA: Usunięto odwołanie do 'nazwa' i 'logo'
     maszyna_dane = n.get("maszyny", {})
     
-    if isinstance(klient_dane, list) and klient_dane:
-        klient_dane = klient_dane[0]
     if isinstance(maszyna_dane, list) and maszyna_dane:
         maszyna_dane = maszyna_dane[0]
 
     return {
         "id": n["id"],
-        "klient_id": n["klient_id"],
-        "klient_nazwa": klient_dane.get("nazwa"),
-        "posrednik_id": n.get("posrednik_id"),
+        "klient_id": n["klient_id"], # Klient jest teraz identyfikowany tylko przez ID
         "marka": maszyna_dane.get("marka"),
         "klasa": maszyna_dane.get("klasa"),
         "ns": n.get("maszyna_ns"),
@@ -86,12 +82,13 @@ def _formatuj_naprawe(n):
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
     """
-    Pobiera wszystkie naprawy, łącząc dane z tabel klienci i maszyny.
+    Pobiera wszystkie naprawy. Łączenie z tabelą 'klienci' nie jest konieczne, 
+    ponieważ identyfikator klienta (klient_id) jest już w tabeli 'naprawy'.
     """
     try:
+        # Zmienione zapytanie: Pobrane są tylko niezbędne dane (bez zbędnego łączenia z klientami)
         zapytanie = r"""
             *,
-            klienci!naprawy_klient_id_fkey(klient_id, nazwa),
             maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
         """
         
@@ -107,12 +104,12 @@ def get_naprawy():
 @app.route("/naprawy/<int:naprawa_id>", methods=["GET"])
 def get_naprawa_by_id(naprawa_id):
     """
-    Pobiera szczegóły jednej naprawy po ID, w tym dane klienta i maszyny.
+    Pobiera szczegóły jednej naprawy po ID, w tym dane maszyny.
     """
     try:
+        # Zmienione zapytanie: Usunięto łączenie z klientami
         zapytanie = r"""
             *,
-            klienci!naprawy_klient_id_fkey(klient_id, nazwa),
             maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
         """
         
@@ -247,7 +244,7 @@ def get_maszyna_by_ns(ns):
 
 @app.route("/maszyny", methods=["POST"])
 def dodaj_lub_pobierz_maszyne():
-    """Dodaje nową maszynę lub pobiera istniejącą (klucz ns)."""
+    """Dodaje nową maszynę lub pobiera istniejącą i aktualizuje dane (klucz ns)."""
     try:
         data = request.get_json()
         marka = data.get("marka")
@@ -264,20 +261,29 @@ def dodaj_lub_pobierz_maszyne():
             .limit(1) \
             .execute()
 
-        if existing.data:
-            return jsonify({"ns": existing.data[0]["ns"]})
-
-        insert = supabase.table("maszyny").insert({
+        payload = {
             "ns": ns,
             "marka": marka,
             "klasa": klasa,
             "opis": opis
-        }).execute()
+        }
 
-        if insert.data:
-             return jsonify({"ns": insert.data[0]["ns"]})
+        if existing.data:
+            # Maszyna istnieje, aktualizuj dane (POST jest używany jako UPSERT)
+            # Uwaga: używamy update, by zaktualizować Markę/Klasę, jeśli zostały przesłane
+            update_resp = supabase.table("maszyny").update(payload).eq("ns", ns).execute()
+            if update_resp.data:
+                return jsonify({"ns": existing.data[0]["ns"]})
+            else:
+                return jsonify({"error": "Brak danych zwrotnych po aktualizacji maszyny"}), 500
+                
         else:
-             return jsonify({"error": "Brak danych zwrotnych po wstawieniu maszyny"}), 500
+            # Maszyna nie istnieje, wstaw nową
+            insert = supabase.table("maszyny").insert(payload).execute()
+            if insert.data:
+                 return jsonify({"ns": insert.data[0]["ns"]})
+            else:
+                 return jsonify({"error": "Brak danych zwrotnych po wstawieniu maszyny"}), 500
 
     except Exception as e:
         print("Błąd w dodaj_lub_pobierz_maszyne:", traceback.format_exc())
@@ -297,10 +303,19 @@ def get_klienci():
         print("Błąd w get_klienci:", e)
         return jsonify({"error": str(e)}), 500
 
-@app.route("/klienci/<string:klient_id>", methods=["GET"])
-def get_klient_by_id(klient_id):
+@app.route("/klienci/<string:klient_id_str>", methods=["GET"])
+def get_klient_by_id(klient_id_str):
     """Pobiera szczegóły klienta po jego ID."""
     try:
+        # Konwertujemy ID na odpowiedni typ (dla pewności, że pasuje do schematu bazy)
+        klient_id = klient_id_str
+        try:
+             # Zakładamy, że jeśli jest to int, to jest to standardowy klucz
+            klient_id = int(klient_id_str)
+        except ValueError:
+            # Jeśli nie jest int, zakładamy, że to np. UUID lub string ID
+            pass
+
         klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id).single().execute()
         
         if klient_resp.data:
@@ -310,45 +325,73 @@ def get_klient_by_id(klient_id):
     except Exception as e:
         if "No rows returned from the query" in str(e):
              return jsonify({"error": "Nie znaleziono klienta"}), 404
-        print(f"Błąd w /klienci/{klient_id} (GET):", traceback.format_exc())
+        print(f"Błąd w /klienci/{klient_id_str} (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 
 @app.route("/klienci", methods=["POST"])
-def dodaj_klienta():
-    """Dodaje nowego klienta lub pobiera istniejącego."""
+def dodaj_lub_pobierz_klienta():
+    """Dodaje nowego klienta lub pobiera istniejącego po nazwie."""
     try:
         data = request.get_json()
         nazwa = data.get("nazwa")
+        logo = data.get("logo") # Używamy 'logo' jako pola do wstawienia
         adres = data.get("adres")
         osoba = data.get("osoba")
         telefon = data.get("telefon")
+        
+        # Jeśli klient_id jest przesłane, używamy go do wyszukiwania
+        klient_id_dane = data.get("klient_id")
 
-        if not nazwa:
-            return jsonify({"error": "Brak nazwy klienta"}), 400
+        if klient_id_dane:
+            # Próba wyszukania po ID
+            existing = supabase.table("klienci") \
+                .select("klient_id") \
+                .eq("klient_id", klient_id_dane) \
+                .limit(1) \
+                .execute()
+        elif logo:
+            # Wyszukiwanie po logo (zakładamy unikalność logo/skrótu)
+            existing = supabase.table("klienci") \
+                .select("klient_id") \
+                .eq("logo", logo) \
+                .limit(1) \
+                .execute()
+        elif nazwa:
+            # Wyszukiwanie po nazwie
+            existing = supabase.table("klienci") \
+                .select("klient_id") \
+                .eq("nazwa", nazwa) \
+                .limit(1) \
+                .execute()
+        else:
+             return jsonify({"error": "Brak danych do identyfikacji klienta (nazwa, logo lub klient_id)"}), 400
 
-        existing = supabase.table("klienci") \
-            .select("klient_id") \
-            .eq("nazwa", nazwa) \
-            .limit(1) \
-            .execute()
 
         if existing.data:
+            # Klient istnieje, zwróć jego ID
             return jsonify({"klient_id": existing.data[0]["klient_id"]})
 
-        insert = supabase.table("klienci").insert({
+        # Jeśli klient nie istnieje i mamy przynajmniej logo lub nazwę, wstaw nowego
+        if not (nazwa or logo):
+            return jsonify({"error": "Brak wymaganych danych do utworzenia nowego klienta (nazwa lub logo)"}), 400
+
+        insert_data = {
             "nazwa": nazwa,
+            "logo": logo,
             "adres": adres,
             "osoba": osoba,
             "telefon": telefon
-        }).execute()
+        }
+        
+        insert = supabase.table("klienci").insert(insert_data).execute()
 
         if insert.data:
             return jsonify({"klient_id": insert.data[0]["klient_id"]})
         else:
              return jsonify({"error": "Brak danych zwrotnych po wstawieniu klienta"}), 500
     except Exception as e:
-        print("Błąd w dodaj_klienta:", traceback.format_exc())
+        print("Błąd w dodaj_lub_pobierz_klienta:", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 # ----------------------------------------------------------------------
@@ -357,19 +400,25 @@ def dodaj_klienta():
 
 @app.route("/slowniki")
 def get_slowniki():
-    r"""Pobiera dane do słowników (marki, klasy, usterki, klienci, ns)."""
+    r"""Pobiera dane do słowników (marki, klasy, usterki, klient_id, ns)."""
     try:
         marki = supabase.table("maszyny").select("marka").execute()
         klasy = supabase.table("maszyny").select("klasa").execute()
         usterki = supabase.table("naprawy").select("opis_usterki").execute()
-        klienci = supabase.table("klienci").select("nazwa").execute()
+        
+        # POBIERAMY TERAZ LISTĘ UNIKALNYCH KLIENT_ID
+        klienci_id_resp = supabase.table("klienci").select("klient_id").execute() 
+        
         numery_seryjne = supabase.table("maszyny").select("ns").execute()
+
+        # Konwersja na listę unikalnych wartości
+        klienci_id = [str(row["klient_id"]) for row in klienci_id_resp.data if row["klient_id"] is not None]
 
         return jsonify({
             "marki": sorted(list(set([row["marka"] for row in marki.data if row["marka"]]))),
             "klasy": sorted(list(set([row["klasa"] for row in klasy.data if row["klasa"]]))),
             "usterki": sorted(list(set([row["opis_usterki"] for row in usterki.data if row["opis_usterki"]]))),
-            "klienci": [row["nazwa"] for row in klienci.data],
+            "klienci_id": sorted(list(set(klienci_id))), # Zwracamy listę ID Klientów
             "numery_seryjne": [row["ns"] for row in numery_seryjne.data]
         })
     except Exception as e:
