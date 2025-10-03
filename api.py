@@ -37,7 +37,8 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ======================================================================
 @app.after_request
 def add_charset_header(response):
-    """
+    # Używamy r""" """ dla bezpiecznego komentarza wieloliniowego
+    r"""
     Dodaje lub poprawia nagłówek Content-Type,
     gwarantując, że zawsze zawiera charset=utf-8 dla odpowiedzi JSON.
     Ponownie koduje dane, aby usunąć sekwencje \uXXXX.
