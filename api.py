@@ -37,7 +37,6 @@ def add_charset_header(response):
     r"""
     Dodaje lub poprawia nagłówek Content-Type,
     gwarantując, że zawsze zawiera charset=utf-8 dla odpowiedzi JSON.
-    Ponownie koduje dane, aby usunąć sekwencje \uXXXX.
     """
     if response.content_type == 'application/json':
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
@@ -73,14 +72,14 @@ def _formatuj_naprawe(n):
         "data_zakonczenia": n.get("data_zakonczenia"),
         "opis_usterki": n.get("opis_usterki"),
         "opis_naprawy": n.get("opis_naprawy"),
-        "posrednik_id": n.get("posrednik_id"), # DODANO
+        "posrednik_id": n.get("posrednik_id"),
         "rozliczone": n.get("rozliczone", False)
     }
 
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
     """
-    Pobiera wszystkie naprawy. Łączenie z tabelą 'klienci' nie jest konieczne.
+    Pobiera wszystkie naprawy.
     """
     try:
         zapytanie = r"""
@@ -139,7 +138,7 @@ def dodaj_naprawe():
             "status": dane["status"],
             "opis_usterki": dane.get("opis_usterki"),
             "opis_naprawy": dane.get("opis_naprawy"),
-            "posrednik_id": dane.get("posrednik_id"), # DODANO
+            "posrednik_id": dane.get("posrednik_id"),
             "rozliczone": dane.get("rozliczone", False)
         }
 
@@ -175,9 +174,9 @@ def update_naprawa(naprawa_id):
 
     pola_do_aktualizacji = {}
     
-    # Lista wszystkich pól do aktualizacji (jeśli istnieją w request.json)
+    # Lista wszystkich pól do aktualizacji 
     pola_naprawy = ["status", "data_zakonczenia", "opis_usterki", "opis_naprawy", 
-                    "posrednik_id", "rozliczone", "klient_id", "maszyna_ns", "data_przyjecia"] # data_przyjecia jest wymagane przy POST, ale moze byc aktualizowane
+                    "posrednik_id", "rozliczone", "klient_id", "maszyna_ns", "data_przyjecia"]
 
     for pole in pola_naprawy:
         if pole in data:
@@ -333,10 +332,10 @@ def dodaj_lub_pobierz_klienta():
             "adres": data.get("adres"),
             "osoba": data.get("osoba"),
             "telefon": data.get("telefon"),
-            "NIP": data.get("NIP") # DODANO
+            "NIP": data.get("NIP")
         }
         
-        # Filtrujemy None, aby uniknąć problemów z Supabase, jeśli pole jest None
+        # Usuń None z payload, aby Supabase użył wartości domyślnych (np. dla klienta_id jeśli jest auto-generowany)
         insert_data = {k: v for k, v in insert_data.items() if v is not None}
 
         insert = supabase.table("klienci").insert(insert_data).execute()
@@ -357,7 +356,7 @@ def update_klient(klient_id_str):
     pola_do_aktualizacji = {}
     
     # Lista wszystkich pól do aktualizacji (oprócz klient_id, które jest PK)
-    pola_klienta = ["nazwa", "adres", "osoba", "telefon", "NIP"] # DODANO NIP
+    pola_klienta = ["nazwa", "adres", "osoba", "telefon", "NIP"]
 
     for pole in pola_klienta:
         if pole in data:
@@ -380,36 +379,6 @@ def update_klient(klient_id_str):
 
 
 # ----------------------------------------------------------------------
-# SŁOWNIKI
-# ----------------------------------------------------------------------
-
-@app.route("/slowniki")
-def get_slowniki():
-    r"""Pobiera dane do słowników (marki, klasy, usterki, klient_id, ns)."""
-    try:
-        marki = supabase.table("maszyny").select("marka").execute()
-        klasy = supabase.table("maszyny").select("klasa").execute()
-        usterki = supabase.table("naprawy").select("opis_usterki").execute()
-        
-        # POBIERAMY TERAZ LISTĘ KLIENT_ID
-        klienci_id_resp = supabase.table("klienci").select("klient_id").execute() 
-        
-        numery_seryjne = supabase.table("maszyny").select("ns").execute()
-
-        # Konwersja na listę unikalnych wartości (zabezpieczenie przed None)
-        klienci_id = [str(row["klient_id"]) for row in klienci_id_resp.data if row["klient_id"] is not None]
-
-        return jsonify({
-            "marki": sorted(list(set([row["marka"] for row in marki.data if row["marka"]]))),
-            "klasy": sorted(list(set([row["klasa"] for row in klasy.data if row["klasa"]]))),
-            "usterki": sorted(list(set([row["opis_usterki"] for row in usterki.data if row["opis_usterki"]]))),
-            "klienci_id": sorted(list(set(klienci_id))), # Zwracamy listę ID Klientów
-            "numery_seryjne": [row["ns"] for row in numery_seryjne.data]
-        })
-    except Exception as e:
-        print("Błąd w /slowniki:", traceback.format_exc())
-        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
-
 # ----------------------------------------------------------------------
 
 if __name__ == "__main__":
