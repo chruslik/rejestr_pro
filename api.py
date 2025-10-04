@@ -41,8 +41,6 @@ def add_charset_header(response):
     """
     if response.content_type == 'application/json':
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
-        # To jest kluczowe: pobiera dane jako tekst (dekoduje \uXXXX),
-        # a następnie ponownie koduje do UTF-8, wysyłając poprawne znaki.
         response.data = response.get_data(as_text=True).encode('utf8')
     return response
 # ======================================================================
@@ -59,7 +57,6 @@ def index():
 
 def _formatuj_naprawe(n):
     """Pomocnicza funkcja do formatowania pojedynczej naprawy."""
-    # UWAGA: Usunięto odwołanie do 'nazwa' i 'logo'
     maszyna_dane = n.get("maszyny", {})
     
     if isinstance(maszyna_dane, list) and maszyna_dane:
@@ -67,7 +64,7 @@ def _formatuj_naprawe(n):
 
     return {
         "id": n["id"],
-        "klient_id": n["klient_id"], # Klient jest teraz identyfikowany tylko przez ID
+        "klient_id": n["klient_id"], 
         "marka": maszyna_dane.get("marka"),
         "klasa": maszyna_dane.get("klasa"),
         "ns": n.get("maszyna_ns"),
@@ -76,17 +73,16 @@ def _formatuj_naprawe(n):
         "data_zakonczenia": n.get("data_zakonczenia"),
         "opis_usterki": n.get("opis_usterki"),
         "opis_naprawy": n.get("opis_naprawy"),
+        "posrednik_id": n.get("posrednik_id"), # DODANO
         "rozliczone": n.get("rozliczone", False)
     }
 
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
     """
-    Pobiera wszystkie naprawy. Łączenie z tabelą 'klienci' nie jest konieczne, 
-    ponieważ identyfikator klienta (klient_id) jest już w tabeli 'naprawy'.
+    Pobiera wszystkie naprawy. Łączenie z tabelą 'klienci' nie jest konieczne.
     """
     try:
-        # Zmienione zapytanie: Pobrane są tylko niezbędne dane (bez zbędnego łączenia z klientami)
         zapytanie = r"""
             *,
             maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
@@ -107,7 +103,6 @@ def get_naprawa_by_id(naprawa_id):
     Pobiera szczegóły jednej naprawy po ID, w tym dane maszyny.
     """
     try:
-        # Zmienione zapytanie: Usunięto łączenie z klientami
         zapytanie = r"""
             *,
             maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
@@ -120,7 +115,6 @@ def get_naprawa_by_id(naprawa_id):
         else:
             return jsonify({"error": "Nie znaleziono naprawy"}), 404
     except Exception as e:
-        # Sprawdzamy błąd, bo single() rzuca wyjątek przy braku wyniku
         if "No rows returned from the query" in str(e):
              return jsonify({"error": "Nie znaleziono naprawy"}), 404
         print(f"Błąd w /naprawy/{naprawa_id} (GET):", traceback.format_exc())
@@ -129,7 +123,7 @@ def get_naprawa_by_id(naprawa_id):
 
 @app.route("/naprawy", methods=["POST"])
 def dodaj_naprawe():
-    """Dodaje nową naprawę, uwzględniając nowe nazwy pól i wymagane dane."""
+    """Dodaje nową naprawę, uwzględniając wszystkie pola z schematu."""
     try:
         dane = request.get_json()
 
@@ -145,7 +139,7 @@ def dodaj_naprawe():
             "status": dane["status"],
             "opis_usterki": dane.get("opis_usterki"),
             "opis_naprawy": dane.get("opis_naprawy"),
-            "posrednik_id": dane.get("posrednik_id"),
+            "posrednik_id": dane.get("posrednik_id"), # DODANO
             "rozliczone": dane.get("rozliczone", False)
         }
 
@@ -176,27 +170,18 @@ def delete_naprawa(naprawa_id):
 
 @app.route("/naprawy/<int:naprawa_id>", methods=["PUT"])
 def update_naprawa(naprawa_id):
-    """Aktualizuje naprawę, uwzględniając nowe nazwy pól."""
+    """Aktualizuje naprawę, uwzględniając wszystkie pola z schematu."""
     data = request.get_json()
 
     pola_do_aktualizacji = {}
-    if "status" in data:
-        pola_do_aktualizacji["status"] = data["status"]
-    if "data_zakonczenia" in data:
-        pola_do_aktualizacji["data_zakonczenia"] = data["data_zakonczenia"]
-    if "opis_usterki" in data:
-        pola_do_aktualizacji["opis_usterki"] = data["opis_usterki"]
-    if "opis_naprawy" in data:
-        pola_do_aktualizacji["opis_naprawy"] = data["opis_naprawy"]
-    if "posrednik_id" in data:
-        pola_do_aktualizacji["posrednik_id"] = data["posrednik_id"]
-    if "rozliczone" in data:
-        pola_do_aktualizacji["rozliczone"] = data["rozliczone"]
-    if "klient_id" in data:
-        pola_do_aktualizacji["klient_id"] = data["klient_id"]
-    if "maszyna_ns" in data:
-        pola_do_aktualizacji["maszyna_ns"] = data["maszyna_ns"]
+    
+    # Lista wszystkich pól do aktualizacji (jeśli istnieją w request.json)
+    pola_naprawy = ["status", "data_zakonczenia", "opis_usterki", "opis_naprawy", 
+                    "posrednik_id", "rozliczone", "klient_id", "maszyna_ns", "data_przyjecia"] # data_przyjecia jest wymagane przy POST, ale moze byc aktualizowane
 
+    for pole in pola_naprawy:
+        if pole in data:
+            pola_do_aktualizacji[pole] = data[pole]
 
     if not pola_do_aktualizacji:
          return jsonify({"error": "Brak danych do aktualizacji"}), 400
@@ -261,6 +246,7 @@ def dodaj_lub_pobierz_maszyne():
             .limit(1) \
             .execute()
 
+        # Payload używany zarówno do wstawienia, jak i do aktualizacji
         payload = {
             "ns": ns,
             "marka": marka,
@@ -270,7 +256,6 @@ def dodaj_lub_pobierz_maszyne():
 
         if existing.data:
             # Maszyna istnieje, aktualizuj dane (POST jest używany jako UPSERT)
-            # Uwaga: używamy update, by zaktualizować Markę/Klasę, jeśli zostały przesłane
             update_resp = supabase.table("maszyny").update(payload).eq("ns", ns).execute()
             if update_resp.data:
                 return jsonify({"ns": existing.data[0]["ns"]})
@@ -307,16 +292,8 @@ def get_klienci():
 def get_klient_by_id(klient_id_str):
     """Pobiera szczegóły klienta po jego ID."""
     try:
-        # Konwertujemy ID na odpowiedni typ (dla pewności, że pasuje do schematu bazy)
-        klient_id = klient_id_str
-        try:
-             # Zakładamy, że jeśli jest to int, to jest to standardowy klucz
-            klient_id = int(klient_id_str)
-        except ValueError:
-            # Jeśli nie jest int, zakładamy, że to np. UUID lub string ID
-            pass
-
-        klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id).single().execute()
+        # klient_id jest traktowane jako string (TEXT)
+        klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_str).single().execute()
         
         if klient_resp.data:
             return jsonify(klient_resp.data)
@@ -331,59 +308,37 @@ def get_klient_by_id(klient_id_str):
 
 @app.route("/klienci", methods=["POST"])
 def dodaj_lub_pobierz_klienta():
-    """Dodaje nowego klienta lub pobiera istniejącego po nazwie."""
+    """Dodaje nowego klienta lub pobiera istniejącego po nazwie (główna metoda identyfikacji)."""
     try:
         data = request.get_json()
         nazwa = data.get("nazwa")
-        logo = data.get("logo") # Używamy 'logo' jako pola do wstawienia
-        adres = data.get("adres")
-        osoba = data.get("osoba")
-        telefon = data.get("telefon")
         
-        # Jeśli klient_id jest przesłane, używamy go do wyszukiwania
-        klient_id_dane = data.get("klient_id")
+        if not nazwa:
+             return jsonify({"error": "Brak wymaganego pola 'nazwa' do identyfikacji klienta"}), 400
 
-        if klient_id_dane:
-            # Próba wyszukania po ID
-            existing = supabase.table("klienci") \
-                .select("klient_id") \
-                .eq("klient_id", klient_id_dane) \
-                .limit(1) \
-                .execute()
-        elif logo:
-            # Wyszukiwanie po logo (zakładamy unikalność logo/skrótu)
-            existing = supabase.table("klienci") \
-                .select("klient_id") \
-                .eq("logo", logo) \
-                .limit(1) \
-                .execute()
-        elif nazwa:
-            # Wyszukiwanie po nazwie
-            existing = supabase.table("klienci") \
-                .select("klient_id") \
-                .eq("nazwa", nazwa) \
-                .limit(1) \
-                .execute()
-        else:
-             return jsonify({"error": "Brak danych do identyfikacji klienta (nazwa, logo lub klient_id)"}), 400
-
+        # Wyszukiwanie po nazwie
+        existing = supabase.table("klienci") \
+            .select("klient_id") \
+            .eq("nazwa", nazwa) \
+            .limit(1) \
+            .execute()
 
         if existing.data:
             # Klient istnieje, zwróć jego ID
             return jsonify({"klient_id": existing.data[0]["klient_id"]})
 
-        # Jeśli klient nie istnieje i mamy przynajmniej logo lub nazwę, wstaw nowego
-        if not (nazwa or logo):
-            return jsonify({"error": "Brak wymaganych danych do utworzenia nowego klienta (nazwa lub logo)"}), 400
-
+        # Jeśli klient nie istnieje, wstaw nowego, używając wszystkich przesłanych danych
         insert_data = {
             "nazwa": nazwa,
-            "logo": logo,
-            "adres": adres,
-            "osoba": osoba,
-            "telefon": telefon
+            "adres": data.get("adres"),
+            "osoba": data.get("osoba"),
+            "telefon": data.get("telefon"),
+            "NIP": data.get("NIP") # DODANO
         }
         
+        # Filtrujemy None, aby uniknąć problemów z Supabase, jeśli pole jest None
+        insert_data = {k: v for k, v in insert_data.items() if v is not None}
+
         insert = supabase.table("klienci").insert(insert_data).execute()
 
         if insert.data:
@@ -393,6 +348,36 @@ def dodaj_lub_pobierz_klienta():
     except Exception as e:
         print("Błąd w dodaj_lub_pobierz_klienta:", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
+
+@app.route("/klienci/<string:klient_id_str>", methods=["PUT"])
+def update_klient(klient_id_str):
+    """Aktualizuje dane klienta, uwzględniając wszystkie pola z schematu."""
+    data = request.get_json()
+
+    pola_do_aktualizacji = {}
+    
+    # Lista wszystkich pól do aktualizacji (oprócz klient_id, które jest PK)
+    pola_klienta = ["nazwa", "adres", "osoba", "telefon", "NIP"] # DODANO NIP
+
+    for pole in pola_klienta:
+        if pole in data:
+            pola_do_aktualizacji[pole] = data[pole]
+
+    if not pola_do_aktualizacji:
+         return jsonify({"error": "Brak danych do aktualizacji"}), 400
+
+    try:
+        # klient_id jest traktowane jako string (TEXT)
+        result = supabase.table("klienci").update(pola_do_aktualizacji).eq("klient_id", klient_id_str).execute()
+
+        if result.data:
+            return jsonify({"message": f"Zaktualizowano klienta o ID: {klient_id_str}"})
+        else:
+            return jsonify({"error": "Nie znaleziono klienta"}), 404
+    except Exception as e:
+        print("Błąd w update_klient:", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
+
 
 # ----------------------------------------------------------------------
 # SŁOWNIKI
@@ -406,12 +391,12 @@ def get_slowniki():
         klasy = supabase.table("maszyny").select("klasa").execute()
         usterki = supabase.table("naprawy").select("opis_usterki").execute()
         
-        # POBIERAMY TERAZ LISTĘ UNIKALNYCH KLIENT_ID
+        # POBIERAMY TERAZ LISTĘ KLIENT_ID
         klienci_id_resp = supabase.table("klienci").select("klient_id").execute() 
         
         numery_seryjne = supabase.table("maszyny").select("ns").execute()
 
-        # Konwersja na listę unikalnych wartości
+        # Konwersja na listę unikalnych wartości (zabezpieczenie przed None)
         klienci_id = [str(row["klient_id"]) for row in klienci_id_resp.data if row["klient_id"] is not None]
 
         return jsonify({
