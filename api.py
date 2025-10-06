@@ -280,11 +280,14 @@ def dodaj_lub_pobierz_maszyne():
 
 @app.route("/klienci/<string:klient_id_str>", methods=["GET"])
 def get_klient_by_id(klient_id_str):
+    """Pobiera dane pojedynczego klienta po jego ID. Używane do walidacji w aplikacji desktopowej."""
     try:
+        # Używamy .single().execute() - klient_resp.data będzie słownikiem lub None/Error
         klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_str).single().execute()
         
-        # Jeśli się udało (kod 200), zwróć dane
-        return jsonify(klient_resp.data[0])
+        # Jeśli się udało (kod 200), zwróć dane. klient_resp.data jest już słownikiem.
+        # Usuwamy [0]
+        return jsonify(klient_resp.data)
 
     # Poprawna obsługa błędu, gdy Supabase .single() nie znajdzie rekordu
     except APIError as e:
@@ -298,8 +301,9 @@ def get_klient_by_id(klient_id_str):
 
     except Exception as e:
         # Obsługa nieznanych błędów serwera
-        print(f"Nieoczekiwany błąd w get_klient_by_id: {e}")
-        return jsonify({"error": "Wewnętrzny błąd serwera"}), 500
+        print("BŁĄD W get_klient_by_id:")
+        print(traceback.format_exc()) # Teraz zobaczysz pełny ślad błędu w logach Render
+        return jsonify({"error": "Wewnętrzny błąd serwera. Sprawdź logi serwera."}), 500
 
 
 @app.route("/klienci", methods=["GET", "POST"])
