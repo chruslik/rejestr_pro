@@ -277,15 +277,28 @@ def dodaj_lub_pobierz_maszyne():
 # ENDPOINTY KLIENTÓW
 # ----------------------------------------------------------------------
 
-@app.route("/klienci", methods=["GET"])
-def get_klienci():
-    """Pobiera wszystkich klientów."""
+@app.route("/klienci/<string:klient_id_str>", methods=["GET"])
+def get_klient_by_id(klient_id_str):
     try:
-        klienci_resp = supabase.table("klienci").select("*").execute()
-        return jsonify(klienci_resp.data)
+        klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_str).single().execute()
+        
+        # Jeśli się udało (kod 200), zwróć dane
+        return jsonify(klient_resp.data[0])
+
+    # Poprawna obsługa błędu, gdy Supabase .single() nie znajdzie rekordu
+    except APIError as e:
+        # Kod PGRST116 oznacza "The result contains 0 rows"
+        if e.code == 'PGRST116':
+            return jsonify({"error": "Nie znaleziono klienta"}), 404 # ZWRACAMY 404
+        
+        # Obsługa innych błędów API Supabase
+        print(f"Błąd Supabase (APIError) w get_klient_by_id: {e}")
+        return jsonify({"error": f"Błąd bazy danych: {e.message}"}), 500
+
     except Exception as e:
-        print("Błąd w get_klienci:", e)
-        return jsonify({"error": str(e)}), 500
+        # Obsługa nieznanych błędów serwera
+        print(f"Nieoczekiwany błąd w get_klient_by_id: {e}")
+        return jsonify({"error": "Wewnętrzny błąd serwera"}), 500
 
 @app.route("/klienci/<string:klient_id_str>", methods=["GET"])
 def get_klient_by_id(klient_id_str):
