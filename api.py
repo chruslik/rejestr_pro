@@ -300,23 +300,6 @@ def get_klient_by_id(klient_id_str):
         print(f"Nieoczekiwany błąd w get_klient_by_id: {e}")
         return jsonify({"error": "Wewnętrzny błąd serwera"}), 500
 
-@app.route("/klienci/<string:klient_id_str>", methods=["GET"])
-def get_klient_by_id(klient_id_str):
-    """Pobiera szczegóły klienta po jego ID."""
-    try:
-        # klient_id jest traktowane jako string (TEXT)
-        klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_str).single().execute()
-        
-        if klient_resp.data:
-            return jsonify(klient_resp.data)
-        else:
-            return jsonify({"error": "Nie znaleziono klienta"}), 404
-    except Exception as e:
-        if "No rows returned from the query" in str(e):
-             return jsonify({"error": "Nie znaleziono klienta"}), 404
-        print(f"Błąd w /klienci/{klient_id_str} (GET):", traceback.format_exc())
-        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
-
 
 @app.route("/klienci", methods=["POST"])
 def dodaj_lub_pobierz_klienta():
