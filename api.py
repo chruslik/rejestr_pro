@@ -311,9 +311,10 @@ def dodaj_lub_pobierz_klienta():
     try:
         data = request.get_json()
         nazwa = data.get("nazwa")
+        klient_id = data.get("klient_id") # POBRANIE KLUCZA KLIENT_ID Z PRZESŁANYCH DANYCH
         
-        if not nazwa:
-             return jsonify({"error": "Brak wymaganego pola 'nazwa' do identyfikacji klienta"}), 400
+        if not nazwa or not klient_id: # Dodatkowa walidacja, że klient_id jest obecne
+             return jsonify({"error": "Brak wymaganego pola 'nazwa' lub 'klient_id'"}), 400
 
         # Wyszukiwanie po nazwie
         existing = supabase.table("klienci") \
@@ -328,6 +329,7 @@ def dodaj_lub_pobierz_klienta():
 
         # Jeśli klient nie istnieje, wstaw nowego, używając wszystkich przesłanych danych
         insert_data = {
+            "klient_id": klient_id, # <--- KLUCZOWA POPRAWKA
             "nazwa": nazwa,
             "adres": data.get("adres"),
             "osoba": data.get("osoba"),
@@ -335,7 +337,7 @@ def dodaj_lub_pobierz_klienta():
             "NIP": data.get("NIP")
         }
         
-        # Usuń None z payload, aby Supabase użył wartości domyślnych (np. dla klienta_id jeśli jest auto-generowany)
+        # Usuń None z payload, aby Supabase użył wartości domyślnych
         insert_data = {k: v for k, v in insert_data.items() if v is not None}
 
         insert = supabase.table("klienci").insert(insert_data).execute()
@@ -343,7 +345,7 @@ def dodaj_lub_pobierz_klienta():
         if insert.data:
             return jsonify({"klient_id": insert.data[0]["klient_id"]})
         else:
-             return jsonify({"error": "Brak danych zwrotnych po wstawieniu klienta"}), 500
+            return jsonify({"error": "Brak danych zwrotnych po wstawieniu klienta"}), 500
     except Exception as e:
         print("Błąd w dodaj_lub_pobierz_klienta:", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
