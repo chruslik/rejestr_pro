@@ -302,50 +302,77 @@ def get_klient_by_id(klient_id_str):
         return jsonify({"error": "Wewnętrzny błąd serwera"}), 500
 
 
-@app.route("/klienci", methods=["POST"])
+@app.route("/klienci", methods=["GET", "POST"])
 def dodaj_lub_pobierz_klienta():
-    """Dodaje nowego klienta lub pobiera istniejącego po nazwie (główna metoda identyfikacji)."""
-    try:
-        data = request.get_json()
-        nazwa = data.get("nazwa")
-        klient_id = data.get("klient_id") # POBRANIE KLUCZA KLIENT_ID Z PRZESŁANYCH DANYCH
-        
-        if not nazwa or not klient_id: # Dodatkowa walidacja, że klient_id jest obecne
-             return jsonify({"error": "Brak wymaganego pola 'nazwa' lub 'klient_id'"}), 400
+    """
+    Obsługuje POST (dodanie nowego klienta) oraz GET (pobranie listy wszystkich klientów).
+    """
+    
+    if request.method == "GET":
+        # ----------------------------------------------------
+        # NOWA LOGIKA: POBIERANIE LISTY WSZYSTKICH KLIENTÓW (Fix dla 405)
+        # ----------------------------------------------------
+        try:
+            # Zmieniłem to na prostsze zapytanie bez .single(), by uniknąć 406
+            klienci = supabase.table("klienci").select("*").execute()
+            
+            # W Supabase .execute() zwraca pełną strukturę; dane są w .data
+            if klienci.data:
+                return jsonify(klienci.data)
+            else:
+                return jsonify([]), 200 # Zwracamy pustą listę, a nie błąd
+                
+        except Exception as e:
+            print("Błąd GET /klienci:", e)
+            return jsonify({"error": "Błąd pobierania listy klientów"}), 500
 
-        # Wyszukiwanie po nazwie
-        existing = supabase.table("klienci") \
-            .select("klient_id") \
-            .eq("nazwa", nazwa) \
-            .limit(1) \
-            .execute()
+    
+    elif request.method == "POST":
+        # ----------------------------------------------------
+        # ISTNIEJĄCA LOGIKA: DODAWANIE NOWEGO KLIENTA
+        # ----------------------------------------------------
+        try:
+            data = request.get_json()
+            nazwa = data.get("nazwa")
+            klient_id = data.get("klient_id") 
+            
+            if not nazwa or not klient_id:
+                  return jsonify({"error": "Brak wymaganego pola 'nazwa' lub 'klient_id'"}), 400
 
-        if existing.data:
-            # Klient istnieje, zwróć jego ID
-            return jsonify({"klient_id": existing.data[0]["klient_id"]})
+            # Wyszukiwanie po nazwie
+            existing = supabase.table("klienci") \
+                .select("klient_id") \
+                .eq("nazwa", nazwa) \
+                .limit(1) \
+                .execute()
 
-        # Jeśli klient nie istnieje, wstaw nowego, używając wszystkich przesłanych danych
-        insert_data = {
-            "klient_id": klient_id, # <--- KLUCZOWA POPRAWKA
-            "nazwa": nazwa,
-            "adres": data.get("adres"),
-            "osoba": data.get("osoba"),
-            "telefon": data.get("telefon"),
-            "NIP": data.get("NIP")
-        }
-        
-        # Usuń None z payload, aby Supabase użył wartości domyślnych
-        insert_data = {k: v for k, v in insert_data.items() if v is not None}
+            if existing.data:
+                # Klient istnieje, zwróć jego ID
+                return jsonify({"klient_id": existing.data[0]["klient_id"]})
 
-        insert = supabase.table("klienci").insert(insert_data).execute()
+            # Jeśli klient nie istnieje, wstaw nowego
+            insert_data = {
+                "klient_id": klient_id, 
+                "nazwa": nazwa,
+                "adres": data.get("adres"),
+                "osoba": data.get("osoba"),
+                "telefon": data.get("telefon"),
+                "NIP": data.get("NIP")
+            }
+            
+            insert_data = {k: v for k, v in insert_data.items() if v is not None}
 
-        if insert.data:
-            return jsonify({"klient_id": insert.data[0]["klient_id"]})
-        else:
-            return jsonify({"error": "Brak danych zwrotnych po wstawieniu klienta"}), 500
-    except Exception as e:
-        print("Błąd w dodaj_lub_pobierz_klienta:", traceback.format_exc())
-        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
+            insert = supabase.table("klienci").insert(insert_data).execute()
+
+            if insert.data:
+                return jsonify({"klient_id": insert.data[0]["klient_id"]})
+            else:
+                return jsonify({"error": "Brak danych zwrotnych po wstawieniu klienta"}), 500
+                
+        except Exception as e:
+            # Pamiętaj o traceback w produkcji, ale użyj prostszego komunikatu dla klienta
+            print("Błąd w dodaj_lub_pobierz_klienta (POST):", e)
+            return jsonify({"error": f"Błąd serwera podczas dodawania klienta: {str(e)}"}), 500
 
 @app.route("/klienci/<string:klient_id_str>", methods=["PUT"])
 def update_klient(klient_id_str):
