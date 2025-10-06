@@ -4,6 +4,7 @@ from supabase import create_client, Client
 import os
 import traceback
 from dotenv import load_dotenv
+from postgrest.exceptions import APIError
 
 app = Flask(__name__)
 CORS(app)
