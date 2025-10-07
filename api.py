@@ -170,31 +170,39 @@ def delete_naprawa(naprawa_id):
 
 @app.route("/naprawy/<int:naprawa_id>", methods=["PUT"])
 def update_naprawa(naprawa_id):
-    """Aktualizuje naprawę, uwzględniając wszystkie pola z schematu."""
+    """Aktualizuje naprawę, akceptując częściową aktualizację danych."""
     data = request.get_json()
 
     pola_do_aktualizacji = {}
     
-    # Lista wszystkich pól do aktualizacji 
+    # Lista wszystkich pól do aktualizacji (kluczowych do filtrowania danych) 
     pola_naprawy = ["status", "data_zakonczenia", "opis_usterki", "opis_naprawy", 
                     "posrednik_id", "rozliczone", "klient_id", "maszyna_ns", "data_przyjecia"]
 
     for pole in pola_naprawy:
+        # Sprawdzamy, czy pole istnieje w przychodzącym JSON, 
+        # co umożliwia aktualizację tylko jednego pola (np. 'rozliczone')
         if pole in data:
             pola_do_aktualizacji[pole] = data[pole]
 
     if not pola_do_aktualizacji:
-         return jsonify({"error": "Brak danych do aktualizacji"}), 400
+        # Ten błąd jest często zwracany, gdy żądanie jest puste lub nie zawiera znanych pól
+        return jsonify({"error": "Brak danych do aktualizacji"}), 400
 
     try:
+        # Wykonaj aktualizację tylko dla przekazanych pól
         result = supabase.table("naprawy").update(pola_do_aktualizacji).eq("id", naprawa_id).execute()
 
         if result.data:
             return jsonify({"message": f"Zaktualizowano naprawę o ID: {naprawa_id}"})
         else:
-            return jsonify({"error": "Nie znaleziono naprawy"}), 404
+            # Pusta lista danych zwrotnych może oznaczać, że ID nie zostało znalezione
+            return jsonify({"error": "Nie znaleziono naprawy o podanym ID lub brak zmian."}), 404
+            
     except Exception as e:
-        print("Błąd w update_naprawa:", traceback.format_exc())
+        # Wypisanie pełnego błędu jest kluczowe dla serwera Render
+        print("Błąd w update_naprawa (PUT):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera (PUT /naprawy): {str(e)}"}), 500
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 # ----------------------------------------------------------------------
