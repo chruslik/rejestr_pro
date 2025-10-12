@@ -77,54 +77,41 @@ def _formatuj_naprawe(n):
         "rozliczone": n.get("rozliczone", False)
     }
 
+# POPRAWIONA FUNKCJA Z OBSŁUGĄ RELACJI:
+
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
-    """
-    Pobiera naprawy, opcjonalnie filtrując po parametrach query.
-    """
+    # ... (pobranie parametrów) ...
+    
     try:
-        # 1. Pobranie parametrów z URL zapytania (nazwy kluczy z URL są poprawne: ns, klient)
-        klient_filter = request.args.get('klient')
-        ns_filter = request.args.get('ns')
-        marka_filter = request.args.get('marka') # To pole jest w zagnieżdżonej relacji
-        klasa_filter = request.args.get('klasa') # To pole jest w zagnieżdżonej relacji
-        status_filter = request.args.get('status')
-        usterka_filter = request.args.get('usterka')
-        
-        # 2. Definicja zapytania SELECT (używasz maszyny!naprawy_maszyna_ns_fkey do pobierania detali maszyny)
         zapytanie_select = r"""
             *,
             maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
         """
         
         query_builder = supabase.table("naprawy").select(zapytanie_select)
-
-        # 3. Dynamiczne dodawanie filtrów
         
-        # POPRAWKA 1: Użyj nazwy kolumny 'klient_id', która jest w tabeli 'naprawy'
+        # ... (poprawione filtry klient_id i maszyna_ns) ...
+
+        # 3. Dynamiczne dodawanie filtrów (Kluczowa zmiana dla relacji!)
+        
         if klient_filter:
-            # Zakładam, że chcesz dopasowanie (ilike) po ID klienta, ale jeśli ID są dokładne, lepiej użyć .eq()
-            # Jeśli klient_filter jest nazwą, a nie ID, musisz go najpierw przetłumaczyć na klient_id!
-            # Jeśli ID klienta to ciąg znaków (np. "Hjort"), użyj ilike/eq.
-            print(f"DEBUG SERWERA: Filtr klient_id (klient) = {klient_filter}")
             query_builder = query_builder.ilike('klient_id', f'%{klient_filter}%') 
 
-        # POPRAWKA 2: Użyj nazwy kolumny 'maszyna_ns', która jest w tabeli 'naprawy'
         if ns_filter:
-            print(f"DEBUG SERWERA: Filtr maszyna_ns (ns) = {ns_filter}")
-            # NS to zazwyczaj dokładne dopasowanie
             query_builder = query_builder.eq('maszyna_ns', ns_filter)
             
-        # POPRAWKA 3: Filtry 'marka' i 'klasa' są w tabeli 'maszyny' (relacja).
-        # Standardowy Supabase Python SDK nie obsługuje filtrowania zagnieżdżonego!
-        # Musisz to zrobić ręcznie:
+        # POPRAWKA DLA MARKI I KLASY (filtry na relacji):
+        # Format: .eq('nazwa_relacji.nazwa_pola', wartość)
+        
         if marka_filter:
-            print("OSTRZEŻENIE SERWERA: Próba filtrowania po 'marka' (tabela 'maszyny'). To może nie działać prawidłowo w Supabase Python SDK dla zagnieżdżonych pól.")
-            # Zostawiamy tę linię, ale wiedz, że może to wymagać widoków PostgreSQL lub ręcznego filtrowania
-            query_builder = query_builder.filter("maszyny.marka", "ilike", f'%{marka_filter}%')
+            print(f"DEBUG SERWERA: Filtr marka (relacja) = {marka_filter}")
+            # Użycie .ilike jest lepsze dla tekstu
+            query_builder = query_builder.ilike('maszyny.marka', f'%{marka_filter}%') 
             
         if klasa_filter:
-            query_builder = query_builder.filter("maszyny.klasa", "ilike", f'%{klasa_filter}%')
+            print(f"DEBUG SERWERA: Filtr klasa (relacja) = {klasa_filter}")
+            query_builder = query_builder.ilike('maszyny.klasa', f'%{klasa_filter}%')
 
         if status_filter:
             query_builder = query_builder.eq('status', status_filter)
@@ -135,13 +122,9 @@ def get_naprawy():
 
         # 4. Wykonanie i zwrócenie danych
         naprawy_resp = query_builder.order("id", desc=True).execute()
-        naprawy = naprawy_resp.data
-
-        wynik = [_formatuj_naprawe(n) for n in naprawy]
-        return jsonify(wynik)
+        # ... (dalsza część funkcji) ...
         
     except Exception as e:
-        # KLUCZOWE LOGOWANIE, aby poznać dokładny błąd
         print("BŁĄD KRYTYCZNY W /naprawy (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
