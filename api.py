@@ -81,38 +81,48 @@ def _formatuj_naprawe(n):
 
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
-    # ... (pobranie parametrów) ...
-    
+    """
+    Pobiera naprawy, opcjonalnie filtrując po parametrach query.
+    Używa poprawnych nazw kolumn z tabeli 'naprawy' oraz stabilnej składni filtrowania dla relacji.
+    """
     try:
+        # 1. Pobranie parametrów z URL zapytania (nazwy kluczy z URL są poprawne: ns, klient, marka, itd.)
+        klient_filter = request.args.get('klient')
+        ns_filter = request.args.get('ns')
+        marka_filter = request.args.get('marka') 
+        klasa_filter = request.args.get('klasa')
+        status_filter = request.args.get('status')
+        usterka_filter = request.args.get('usterka')
+        
+        # 2. Definicja zapytania SELECT z zagnieżdżeniem danych maszyny
         zapytanie_select = r"""
             *,
             maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
         """
         
         query_builder = supabase.table("naprawy").select(zapytanie_select)
-        
-        # ... (poprawione filtry klient_id i maszyna_ns) ...
 
-        # 3. Dynamiczne dodawanie filtrów (Kluczowa zmiana dla relacji!)
+        # 3. Dynamiczne dodawanie filtrów
         
+        # KLIENT: Kolumna w bazie to 'klient_id'
         if klient_filter:
+            # Używamy .ilike dla częściowego dopasowania nazwy klienta
             query_builder = query_builder.ilike('klient_id', f'%{klient_filter}%') 
 
+        # NUMER SERYJNY: Kolumna w bazie to 'maszyna_ns'
         if ns_filter:
+            # NS to zazwyczaj dokładne dopasowanie
             query_builder = query_builder.eq('maszyna_ns', ns_filter)
             
-        # POPRAWKA DLA MARKI I KLASY (filtry na relacji):
-        # Format: .eq('nazwa_relacji.nazwa_pola', wartość)
-        
+        # MARKA i KLASA: Pola z relacji, wymagają składni 'nazwa_relacji.pole' z metodą .filter()
+        # Używamy stabilnej metody .filter() z trzema argumentami dla relacji.
         if marka_filter:
-            print(f"DEBUG SERWERA: Filtr marka (relacja) = {marka_filter}")
-            # Użycie .ilike jest lepsze dla tekstu
-            query_builder = query_builder.ilike('maszyny.marka', f'%{marka_filter}%') 
+            query_builder = query_builder.filter('maszyny.marka', 'ilike', f'%{marka_filter}%') 
             
         if klasa_filter:
-            print(f"DEBUG SERWERA: Filtr klasa (relacja) = {klasa_filter}")
-            query_builder = query_builder.ilike('maszyny.klasa', f'%{klasa_filter}%')
+            query_builder = query_builder.filter('maszyny.klasa', 'ilike', f'%{klasa_filter}%')
 
+        # STATUS i USTERKA: Kolumny w tabeli 'naprawy'
         if status_filter:
             query_builder = query_builder.eq('status', status_filter)
             
@@ -122,12 +132,15 @@ def get_naprawy():
 
         # 4. Wykonanie i zwrócenie danych
         naprawy_resp = query_builder.order("id", desc=True).execute()
-        # ... (dalsza część funkcji) ...
+        naprawy = naprawy_resp.data
+
+        wynik = [_formatuj_naprawe(n) for n in naprawy]
+        return jsonify(wynik)
         
     except Exception as e:
+        # Bardzo ważne pełne logowanie błędu serwera
         print("BŁĄD KRYTYCZNY W /naprawy (GET):", traceback.format_exc())
-        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
-
+        return jsonify({"error": f"Błąd serwera: Błąd wewnętrzny. {str(e)}"}), 500
 
 @app.route("/naprawy", methods=["POST"])
 def dodaj_naprawe():
