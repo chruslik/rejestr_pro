@@ -80,50 +80,56 @@ def _formatuj_naprawe(n):
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
     """
-    Pobiera naprawy, opcjonalnie filtrując po parametrach query (klient, ns, marka, klasa, status, usterka).
+    Pobiera naprawy, opcjonalnie filtrując po parametrach query.
     """
     try:
-        # 1. Pobranie parametrów z URL zapytania
+        # 1. Pobranie parametrów z URL zapytania (nazwy kluczy z URL są poprawne: ns, klient)
         klient_filter = request.args.get('klient')
         ns_filter = request.args.get('ns')
-        marka_filter = request.args.get('marka')
-        klasa_filter = request.args.get('klasa')
+        marka_filter = request.args.get('marka') # To pole jest w zagnieżdżonej relacji
+        klasa_filter = request.args.get('klasa') # To pole jest w zagnieżdżonej relacji
         status_filter = request.args.get('status')
         usterka_filter = request.args.get('usterka')
         
-        # 2. Definicja zapytania SELECT
+        # 2. Definicja zapytania SELECT (używasz maszyny!naprawy_maszyna_ns_fkey do pobierania detali maszyny)
         zapytanie_select = r"""
             *,
             maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
         """
         
-        # Inicjalizacja budowania zapytania
         query_builder = supabase.table("naprawy").select(zapytanie_select)
 
         # 3. Dynamiczne dodawanie filtrów
         
+        # POPRAWKA 1: Użyj nazwy kolumny 'klient_id', która jest w tabeli 'naprawy'
         if klient_filter:
-            # Użyjemy .ilike dla częściowego dopasowania nazwy klienta (case-insensitive)
-            # Jeśli kolumna w bazie to klient_id, użyj .eq('klient_id', klient_filter)
-            query_builder = query_builder.ilike('klient', f'%{klient_filter}%')
+            # Zakładam, że chcesz dopasowanie (ilike) po ID klienta, ale jeśli ID są dokładne, lepiej użyć .eq()
+            # Jeśli klient_filter jest nazwą, a nie ID, musisz go najpierw przetłumaczyć na klient_id!
+            # Jeśli ID klienta to ciąg znaków (np. "Hjort"), użyj ilike/eq.
+            print(f"DEBUG SERWERA: Filtr klient_id (klient) = {klient_filter}")
+            query_builder = query_builder.ilike('klient_id', f'%{klient_filter}%') 
 
+        # POPRAWKA 2: Użyj nazwy kolumny 'maszyna_ns', która jest w tabeli 'naprawy'
         if ns_filter:
-            # ns jest prawdopodobnie dokładnym dopasowaniem
-            query_builder = query_builder.eq('ns', ns_filter)
+            print(f"DEBUG SERWERA: Filtr maszyna_ns (ns) = {ns_filter}")
+            # NS to zazwyczaj dokładne dopasowanie
+            query_builder = query_builder.eq('maszyna_ns', ns_filter)
             
+        # POPRAWKA 3: Filtry 'marka' i 'klasa' są w tabeli 'maszyny' (relacja).
+        # Standardowy Supabase Python SDK nie obsługuje filtrowania zagnieżdżonego!
+        # Musisz to zrobić ręcznie:
         if marka_filter:
-            # Użyjemy .ilike lub .eq, w zależności od oczekiwanego zachowania
-            query_builder = query_builder.ilike('marka', f'%{marka_filter}%')
+            print("OSTRZEŻENIE SERWERA: Próba filtrowania po 'marka' (tabela 'maszyny'). To może nie działać prawidłowo w Supabase Python SDK dla zagnieżdżonych pól.")
+            # Zostawiamy tę linię, ale wiedz, że może to wymagać widoków PostgreSQL lub ręcznego filtrowania
+            query_builder = query_builder.filter("maszyny.marka", "ilike", f'%{marka_filter}%')
             
         if klasa_filter:
-            query_builder = query_builder.ilike('klasa', f'%{klasa_filter}%')
+            query_builder = query_builder.filter("maszyny.klasa", "ilike", f'%{klasa_filter}%')
 
         if status_filter:
-            # Status to zazwyczaj dokładne dopasowanie
             query_builder = query_builder.eq('status', status_filter)
             
         if usterka_filter:
-            # Usterka to często wyszukiwanie tekstu w polu
             query_builder = query_builder.ilike('opis_usterki', f'%{usterka_filter}%')
 
 
@@ -135,7 +141,8 @@ def get_naprawy():
         return jsonify(wynik)
         
     except Exception as e:
-        print("Błąd w /naprawy (GET):", traceback.format_exc())
+        # KLUCZOWE LOGOWANIE, aby poznać dokładny błąd
+        print("BŁĄD KRYTYCZNY W /naprawy (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 
