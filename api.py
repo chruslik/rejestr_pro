@@ -79,14 +79,19 @@ def _formatuj_naprawe(n):
 
 # POPRAWIONA FUNKCJA Z OBSŁUGĄ RELACJI:
 
+from flask import request, jsonify
+import traceback 
+
+# ... (inne importy: supabase, app, _formatuj_naprawe)
+
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
     """
-    Pobiera naprawy, opcjonalnie filtrując po parametrach query.
-    Używa poprawnych nazw kolumn z tabeli 'naprawy' oraz stabilnej składni filtrowania dla relacji.
+    Pobiera naprawy, używając funkcji RPC w Supabase (get_naprawy_z_filtrami)
+    do bezpiecznego i stabilnego filtrowania, w tym na relacjach.
     """
     try:
-        # 1. Pobranie parametrów z URL zapytania (nazwy kluczy z URL są poprawne: ns, klient, marka, itd.)
+        # 1. Pobranie parametrów z URL zapytania
         klient_filter = request.args.get('klient')
         ns_filter = request.args.get('ns')
         marka_filter = request.args.get('marka') 
@@ -94,51 +99,40 @@ def get_naprawy():
         status_filter = request.args.get('status')
         usterka_filter = request.args.get('usterka')
         
-        # 2. Definicja zapytania SELECT z zagnieżdżeniem danych maszyny
-        zapytanie_select = r"""
-            *,
-            maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
-        """
+        # 2. Definicja argumentów dla funkcji RPC
+        params = {
+            # Klucze muszą pasować do argumentów funkcji PostgreSQL
+            "_klient_id": klient_filter,
+            "_maszyna_ns": ns_filter,
+            "_marka": marka_filter,
+            "_klasa": klasa_filter,
+            "_status": status_filter,
+            "_opis_usterki": usterka_filter
+        }
         
-        query_builder = supabase.table("naprawy").select(zapytanie_select)
-
-        # 3. Dynamiczne dodawanie filtrów
+        # Usuwamy puste wartości (None lub "") z parametrów przed wysłaniem do RPC,
+        # aby funkcja bazodanowa mogła je zinterpretować jako NULL (co pomija filtr).
+        params_rpc = {k: v for k, v in params.items() if v}
         
-        # KLIENT: Kolumna w bazie to 'klient_id'
-        if klient_filter:
-            # Używamy .ilike dla częściowego dopasowania nazwy klienta
-            query_builder = query_builder.ilike('klient_id', f'%{klient_filter}%') 
+        # 3. Wywołanie funkcji RPC
+        # Używamy metody .rpc() zamiast .table().select()
+        naprawy_resp = supabase.rpc(
+            'get_naprawy_z_filtrami', 
+            params=params_rpc
+        ).execute()
 
-        # NUMER SERYJNY: Kolumna w bazie to 'maszyna_ns'
-        if ns_filter:
-            # NS to zazwyczaj dokładne dopasowanie
-            query_builder = query_builder.eq('maszyna_ns', ns_filter)
-            
-        # MARKA i KLASA: Pola z relacji, wymagają składni 'nazwa_relacji.pole' z metodą .filter()
-        # Używamy stabilnej metody .filter() z trzema argumentami dla relacji.
-        if marka_filter:
-            query_builder = query_builder.filter('maszyny.marka', 'ilike', f'%{marka_filter}%') 
-            
-        if klasa_filter:
-            query_builder = query_builder.filter('maszyny.klasa', 'ilike', f'%{klasa_filter}%')
-
-        # STATUS i USTERKA: Kolumny w tabeli 'naprawy'
-        if status_filter:
-            query_builder = query_builder.eq('status', status_filter)
-            
-        if usterka_filter:
-            query_builder = query_builder.ilike('opis_usterki', f'%{usterka_filter}%')
-
-
-        # 4. Wykonanie i zwrócenie danych
-        naprawy_resp = query_builder.order("id", desc=True).execute()
         naprawy = naprawy_resp.data
 
+        # 4. Formatowanie i zwrócenie danych
+        # Uwaga: RPC zwraca tylko kolumny z tabeli 'naprawy', więc Twoja funkcja 
+        # _formatuj_naprawe() musi być w stanie obsłużyć brak zagnieżdżonych danych maszyny.
+        # Jeśli potrzebujesz danych z 'maszyny', RPC musi zwrócić widok lub musisz pobrać je osobno.
+        # Jeśli _formatuj_naprawe oczekuje zagnieżdżenia, należy to skorygować.
+        
         wynik = [_formatuj_naprawe(n) for n in naprawy]
         return jsonify(wynik)
         
     except Exception as e:
-        # Bardzo ważne pełne logowanie błędu serwera
         print("BŁĄD KRYTYCZNY W /naprawy (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: Błąd wewnętrzny. {str(e)}"}), 500
 
