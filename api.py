@@ -80,44 +80,62 @@ def _formatuj_naprawe(n):
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
     """
-    Pobiera wszystkie naprawy.
+    Pobiera naprawy, opcjonalnie filtrując po parametrach query (klient, ns, marka, klasa, status, usterka).
     """
     try:
-        zapytanie = r"""
+        # 1. Pobranie parametrów z URL zapytania
+        klient_filter = request.args.get('klient')
+        ns_filter = request.args.get('ns')
+        marka_filter = request.args.get('marka')
+        klasa_filter = request.args.get('klasa')
+        status_filter = request.args.get('status')
+        usterka_filter = request.args.get('usterka')
+        
+        # 2. Definicja zapytania SELECT
+        zapytanie_select = r"""
             *,
             maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
         """
         
-        naprawy_resp = supabase.table("naprawy").select(zapytanie).order("id", desc=True).execute()
+        # Inicjalizacja budowania zapytania
+        query_builder = supabase.table("naprawy").select(zapytanie_select)
+
+        # 3. Dynamiczne dodawanie filtrów
+        
+        if klient_filter:
+            # Użyjemy .ilike dla częściowego dopasowania nazwy klienta (case-insensitive)
+            # Jeśli kolumna w bazie to klient_id, użyj .eq('klient_id', klient_filter)
+            query_builder = query_builder.ilike('klient', f'%{klient_filter}%')
+
+        if ns_filter:
+            # ns jest prawdopodobnie dokładnym dopasowaniem
+            query_builder = query_builder.eq('ns', ns_filter)
+            
+        if marka_filter:
+            # Użyjemy .ilike lub .eq, w zależności od oczekiwanego zachowania
+            query_builder = query_builder.ilike('marka', f'%{marka_filter}%')
+            
+        if klasa_filter:
+            query_builder = query_builder.ilike('klasa', f'%{klasa_filter}%')
+
+        if status_filter:
+            # Status to zazwyczaj dokładne dopasowanie
+            query_builder = query_builder.eq('status', status_filter)
+            
+        if usterka_filter:
+            # Usterka to często wyszukiwanie tekstu w polu
+            query_builder = query_builder.ilike('opis_usterki', f'%{usterka_filter}%')
+
+
+        # 4. Wykonanie i zwrócenie danych
+        naprawy_resp = query_builder.order("id", desc=True).execute()
         naprawy = naprawy_resp.data
 
         wynik = [_formatuj_naprawe(n) for n in naprawy]
         return jsonify(wynik)
+        
     except Exception as e:
         print("Błąd w /naprawy (GET):", traceback.format_exc())
-        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
-
-@app.route("/naprawy/<int:naprawa_id>", methods=["GET"])
-def get_naprawa_by_id(naprawa_id):
-    """
-    Pobiera szczegóły jednej naprawy po ID, w tym dane maszyny.
-    """
-    try:
-        zapytanie = r"""
-            *,
-            maszyny!naprawy_maszyna_ns_fkey(ns, klasa, marka)
-        """
-        
-        naprawa_resp = supabase.table("naprawy").select(zapytanie).eq("id", naprawa_id).single().execute()
-        
-        if naprawa_resp.data:
-            return jsonify(_formatuj_naprawe(naprawa_resp.data))
-        else:
-            return jsonify({"error": "Nie znaleziono naprawy"}), 404
-    except Exception as e:
-        if "No rows returned from the query" in str(e):
-             return jsonify({"error": "Nie znaleziono naprawy"}), 404
-        print(f"Błąd w /naprawy/{naprawa_id} (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 
