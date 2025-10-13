@@ -84,6 +84,41 @@ import traceback
 
 # ... (inne importy: supabase, app, _formatuj_naprawe)
 
+
+# === WYMAGANA FUNKCJA FORMATUJĄCA DANE ===
+# Musi być dostępna w Twoim pliku serwera.
+# Ta funkcja dostosowuje się do spłaszczonego formatu zwracanego przez funkcję RPC.
+def _formatuj_naprawe(naprawa):
+    """
+    Formatuje dane naprawy zwrócone przez funkcję RPC get_naprawy_z_filtrami.
+    Oczekuje płaskich kolumn, w tym 'maszyna_marka' i 'maszyna_klasa'.
+    """
+    # Używamy płaskich kolumn z RPC (zdefiniowanych w SQL jako aliasy)
+    marka = naprawa.get('maszyna_marka', 'Brak') 
+    klasa = naprawa.get('maszyna_klasa', 'Brak')
+    
+    # Pozostałe kolumny są takie same
+    return {
+        'id': naprawa.get('id'),
+        # Używamy klient_id i maszyna_ns jako nazwy pól, by pasowały do danych Treeview
+        'klient_id': naprawa.get('klient_id', 'Brak'), 
+        'maszyna_ns': naprawa.get('maszyna_ns', 'Brak'),
+        
+        # Wstawiamy pola relacji na tym samym poziomie
+        'marka': marka,
+        'klasa': klasa,
+        
+        'data_przyjecia': naprawa.get('data_przyjecia'),
+        'data_zakonczenia': naprawa.get('data_zakonczenia'),
+        'status': naprawa.get('status'),
+        'opis_usterki': naprawa.get('opis_usterki'),
+        'opis_naprawy': naprawa.get('opis_naprawy'),
+        'posrednik_id': naprawa.get('posrednik_id'),
+        'rozliczone': naprawa.get('rozliczone'),
+    }
+
+# ==========================================
+
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
     """
@@ -100,8 +135,8 @@ def get_naprawy():
         usterka_filter = request.args.get('usterka')
         
         # 2. Definicja argumentów dla funkcji RPC
+        # Nazwy kluczy MUSZĄ pasować do argumentów funkcji PostgreSQL
         params = {
-            # Klucze muszą pasować do argumentów funkcji PostgreSQL
             "_klient_id": klient_filter,
             "_maszyna_ns": ns_filter,
             "_marka": marka_filter,
@@ -110,12 +145,14 @@ def get_naprawy():
             "_opis_usterki": usterka_filter
         }
         
-        # Usuwamy puste wartości (None lub "") z parametrów przed wysłaniem do RPC,
-        # aby funkcja bazodanowa mogła je zinterpretować jako NULL (co pomija filtr).
+        # Usuwamy puste wartości (None lub "")
+        # Uwaga: Flask automatycznie konwertuje klucze z query stringa na None, jeśli ich nie ma
         params_rpc = {k: v for k, v in params.items() if v}
         
+        print(f"DEBUG API: Wywołanie RPC z filtrami: {params_rpc}")
+        
         # 3. Wywołanie funkcji RPC
-        # Używamy metody .rpc() zamiast .table().select()
+        # Zakładamy, że zmienna 'supabase' jest poprawnie zdefiniowana i zainicjowana
         naprawy_resp = supabase.rpc(
             'get_naprawy_z_filtrami', 
             params=params_rpc
@@ -124,15 +161,14 @@ def get_naprawy():
         naprawy = naprawy_resp.data
 
         # 4. Formatowanie i zwrócenie danych
-        # Uwaga: RPC zwraca tylko kolumny z tabeli 'naprawy', więc Twoja funkcja 
-        # _formatuj_naprawe() musi być w stanie obsłużyć brak zagnieżdżonych danych maszyny.
-        # Jeśli potrzebujesz danych z 'maszyny', RPC musi zwrócić widok lub musisz pobrać je osobno.
-        # Jeśli _formatuj_naprawe oczekuje zagnieżdżenia, należy to skorygować.
+        # Używamy zaktualizowanej funkcji _formatuj_naprawe, która obsługuje
+        # spłaszczone kolumny 'maszyna_marka' i 'maszyna_klasa'.
         
         wynik = [_formatuj_naprawe(n) for n in naprawy]
         return jsonify(wynik)
         
     except Exception as e:
+        # Upewnij się, że masz zaimportowany 'traceback'
         print("BŁĄD KRYTYCZNY W /naprawy (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: Błąd wewnętrzny. {str(e)}"}), 500
 
