@@ -134,6 +134,45 @@ def get_naprawy():
         print("BŁĄD KRYTYCZNY W /naprawy (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: Błąd wewnętrzny. {str(e)}"}), 500
 
+@app.route("/naprawy/<int:naprawa_id>", methods=["GET"])
+def get_naprawa_by_id(naprawa_id):
+    """
+    Pobiera pojedynczą naprawę po ID, zwracając spłaszczone dane z marką i klasą.
+    Naprawia błąd 405 podczas próby edycji.
+    """
+    try:
+        # Pobieramy naprawę i łączymy z maszyną w jednym zapytaniu Supabase,
+        # co jest wydajniejsze niż łączenie danych ręcznie.
+        # Używamy select z relacją ('maszyny(marka,klasa)').
+        naprawa_resp = supabase.table("naprawy").select(
+            "*, maszyny(marka, klasa)" 
+        ).eq("id", naprawa_id).single().execute()
+        
+        naprawa_data = naprawa_resp.data
+        
+        if not naprawa_data:
+            return jsonify({"error": "Naprawa nie została znaleziona"}), 404
+        
+        # Wyodrębnienie danych maszyny
+        maszyna_dane = naprawa_data.pop("maszyny", {})
+        
+        # Formatowanie wyniku, aby był płaski, jak oczekuje front-end (dla edycji)
+        wynik = {
+            **naprawa_data, # Kopiowanie wszystkich pól z tabeli naprawy
+            "marka": maszyna_dane.get("marka", "Brak"),
+            "klasa": maszyna_dane.get("klasa", "Brak"),
+        }
+        
+        return jsonify(wynik)
+        
+    except Exception as e:
+        # Obsługa błędu gdy single() nie znajduje rekordu
+        if "No rows returned from the query" in str(e) or (hasattr(e, 'code') and e.code == 'PGRST116'):
+            return jsonify({"error": "Naprawa nie została znaleziona"}), 404
+            
+        print(f"Błąd w /naprawy/{naprawa_id} (GET):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
+
 @app.route("/naprawy/<int:naprawa_id>", methods=["POST"])
 # ... (rest of the endpoints: dodaj_naprawe, delete_naprawa, update_naprawa, maszyny, klienci) ...
 
