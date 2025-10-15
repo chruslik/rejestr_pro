@@ -126,16 +126,26 @@ def get_naprawy():
     do bezpiecznego i stabilnego filtrowania, w tym na relacjach.
     """
     try:
-        # 1. Pobranie parametrów z URL zapytania
-        klient_filter = request.args.get('klient')
-        ns_filter = request.args.get('ns')
-        marka_filter = request.args.get('marka') 
-        klasa_filter = request.args.get('klasa')
-        status_filter = request.args.get('status')
-        usterka_filter = request.args.get('usterka')
+        # 1. Poprawione nazwy kluczy z URL zapytania (request.args.get)
+        # MUSZĄ PASOWAĆ do kluczy w query stringu wysyłanym przez desktop app!
+        # Użyjemy nazw Z PODKREŚLENIEM, aby dopasować do argumentów RPC poniżej
+        klient_filter = request.args.get('_klient_id')
+        ns_filter = request.args.get('_maszyna_ns')
+        marka_filter = request.args.get('_marka') 
+        klasa_filter = request.args.get('_klasa')
+        status_filter = request.args.get('_status')
+        usterka_filter = request.args.get('_opis_usterki')
         
+        # Opcjonalnie: Jeśli zmienisz w desktop app filtry na klucze BEZ podkreślenia
+        # (co jest lepszą konwencją dla query string), użyj:
+        # klient_filter = request.args.get('klient_id')
+        # ...
+        # W takim przypadku zmieniasz front-end. Zostawmy to na razie tak jak jest
+        # dla zgodności z Twoim pierwotnym formatem RPC.
+
         # 2. Definicja argumentów dla funkcji RPC
         # Nazwy kluczy MUSZĄ pasować do argumentów funkcji PostgreSQL
+        # ZOSTAW NIEZMIENIONE, ponieważ front-end i RPC używają _klient_id
         params = {
             "_klient_id": klient_filter,
             "_maszyna_ns": ns_filter,
@@ -145,33 +155,16 @@ def get_naprawy():
             "_opis_usterki": usterka_filter
         }
         
-        # Usuwamy puste wartości (None lub "")
-        # Uwaga: Flask automatycznie konwertuje klucze z query stringa na None, jeśli ich nie ma
+        # ... reszta kodu jest poprawna ...
+        
         params_rpc = {k: v for k, v in params.items() if v}
         
         print(f"DEBUG API: Wywołanie RPC z filtrami: {params_rpc}")
         
-        # 3. Wywołanie funkcji RPC
-        # Zakładamy, że zmienna 'supabase' jest poprawnie zdefiniowana i zainicjowana
         naprawy_resp = supabase.rpc(
             'get_naprawy_z_filtrami', 
             params=params_rpc
         ).execute()
-
-        naprawy = naprawy_resp.data
-
-        # 4. Formatowanie i zwrócenie danych
-        # Używamy zaktualizowanej funkcji _formatuj_naprawe, która obsługuje
-        # spłaszczone kolumny 'maszyna_marka' i 'maszyna_klasa'.
-        
-        wynik = [_formatuj_naprawe(n) for n in naprawy]
-        return jsonify(wynik)
-        
-    except Exception as e:
-        # Upewnij się, że masz zaimportowany 'traceback'
-        print("BŁĄD KRYTYCZNY W /naprawy (GET):", traceback.format_exc())
-        return jsonify({"error": f"Błąd serwera: Błąd wewnętrzny. {str(e)}"}), 500
-
 @app.route("/naprawy", methods=["POST"])
 def dodaj_naprawe():
     """Dodaje nową naprawę, uwzględniając wszystkie pola z schematu."""
