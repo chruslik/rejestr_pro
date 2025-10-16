@@ -91,7 +91,7 @@ def dodaj_klienta():
         data = request.get_json()
         
         # Wymagane pola
-        if 'id' not in data or not data['id']:
+        if 'klient_id' not in data or not data['klient_id']:
             return jsonify({"error": "Pole 'id' jest wymagane."}), 400
             
         # Pamiętaj, że ID klienta to klucz główny (PRIMARY KEY), musi być unikalne.
