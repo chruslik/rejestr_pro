@@ -46,6 +46,69 @@ def add_charset_header(response):
     return response
 # ======================================================================
 
+# ----------------------------------------------------------------------
+# ENDPOINTY MASZYN
+# ----------------------------------------------------------------------
+
+@app.route("/maszyny", methods=["GET"])
+def get_maszyny():
+    """Pobiera listę wszystkich maszyn."""
+    try:
+        # Pamiętaj, że maszyny są pobierane w RPC, ale to jest endpoint do listy filtrów
+        maszyny = supabase.table("maszyny").select("*").execute()
+        
+        if maszyny.data:
+            return jsonify(maszyny.data)
+        return jsonify([])
+            
+    except Exception as e:
+        print("Błąd GET /maszyny:", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera (GET /maszyny): {str(e)}"}), 500
+
+# ----------------------------------------------------------------------
+# ENDPOINTY KLIENTÓW
+# ----------------------------------------------------------------------
+
+@app.route("/klienci", methods=["GET"])
+def get_klienci():
+    """Pobiera listę wszystkich klientów."""
+    try:
+        # Pamiętaj, że klienci są pobierani w RPC, ale to jest endpoint do listy filtrów
+        klienci = supabase.table("klienci").select("*").execute()
+        
+        if klienci.data:
+            return jsonify(klienci.data)
+        return jsonify([])
+            
+    except Exception as e:
+        print("Błąd GET /klienci:", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera (GET /klienci): {str(e)}"}), 500
+
+@app.route("/klienci", methods=["POST"])
+def dodaj_klienta():
+    """Dodaje nowego klienta."""
+    try:
+        data = request.get_json()
+        
+        # Wymagane pola
+        if 'id' not in data or not data['id']:
+            return jsonify({"error": "Pole 'id' jest wymagane."}), 400
+            
+        # Pamiętaj, że ID klienta to klucz główny (PRIMARY KEY), musi być unikalne.
+        # Supabase zgłosi błąd, jeśli ID już istnieje.
+        
+        result = supabase.table("klienci").insert(data).execute()
+        return jsonify({"message": f"Dodano klienta: {data['id']}"}), 201
+
+    except APIError as ae:
+        # Błąd unikalności
+        if 'duplicate key value violates unique constraint' in str(ae):
+            return jsonify({"error": "Klient o podanym ID już istnieje."}), 409
+        print("Błąd POST /klienci (APIError):", traceback.format_exc())
+        return jsonify({"error": f"Błąd Supabase: {str(ae)}"}), 500
+    except Exception as e:
+        print("Błąd POST /klienci:", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
 @app.route("/")
 def index():
