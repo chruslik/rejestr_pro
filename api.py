@@ -98,7 +98,7 @@ def dodaj_klienta():
         # Supabase zgłosi błąd, jeśli ID już istnieje.
         
         result = supabase.table("klienci").insert(data).execute()
-        return jsonify({"message": f"Dodano klienta: {data['id']}"}), 201
+        return jsonify({"message": f"Dodano klienta: {data['klient_id']}"}), 201
 
     except APIError as ae:
         # Błąd unikalności
