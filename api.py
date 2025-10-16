@@ -23,7 +23,6 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-
 # Sprawdzenie, czy klucze są dostępne, aby uniknąć błędów
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise EnvironmentError("Brak SUPABASE_URL lub SUPABASE_KEY w zmiennych środowiskowych.")
@@ -41,10 +40,13 @@ def add_charset_header(response):
     """
     if response.content_type == 'application/json':
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
-        # Zrezygnowanie z ponownego kodowania, ponieważ może to powodować błędy.
-        # Flask i jsonify powinny to robić poprawnie.
     return response
 # ======================================================================
+
+@app.route("/")
+def index():
+    """Sprawdzenie statusu API."""
+    return {"status": "ok", "message": "API działa"}
 
 # ----------------------------------------------------------------------
 # ENDPOINTY MASZYN
@@ -52,9 +54,8 @@ def add_charset_header(response):
 
 @app.route("/maszyny", methods=["GET"])
 def get_maszyny():
-    """Pobiera listę wszystkich maszyn."""
+    """Pobiera listę wszystkich maszyn (do filtrów)."""
     try:
-        # Pamiętaj, że maszyny są pobierane w RPC, ale to jest endpoint do listy filtrów
         maszyny = supabase.table("maszyny").select("*").execute()
         
         if maszyny.data:
@@ -65,6 +66,28 @@ def get_maszyny():
         print("Błąd GET /maszyny:", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera (GET /maszyny): {str(e)}"}), 500
 
+### ⚠️ POPRAWKA: BRAKUJĄCY ENDPOINT GET /maszyny/<id>
+@app.route("/maszyny/<string:maszyna_ns_str>", methods=["GET"])
+def get_maszyna_by_id(maszyna_ns_str):
+    """Pobiera pojedynczą maszynę po numerze seryjnym (maszyna_ns)."""
+    try:
+        # Używamy nowej, ujednoliconej nazwy kolumny: maszyna_ns
+        maszyna_resp = supabase.table("maszyny").select("*").eq("maszyna_ns", maszyna_ns_str).single().execute()
+        
+        maszyna_data = maszyna_resp.data
+        if not maszyna_data:
+            return jsonify({"error": "Maszyna nie została znaleziona"}), 404
+        
+        return jsonify(maszyna_data)
+        
+    except Exception as e:
+        # Obsługa błędu gdy single() nie znajduje rekordu
+        if "No rows returned from the query" in str(e) or (hasattr(e, 'code') and e.code == 'PGRST116'):
+            return jsonify({"error": "Maszyna nie została znaleziona"}), 404
+        
+        print(f"Błąd w /maszyny/{maszyna_ns_str} (GET):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
+
 # ----------------------------------------------------------------------
 # ENDPOINTY KLIENTÓW
 # ----------------------------------------------------------------------
@@ -73,7 +96,6 @@ def get_maszyny():
 def get_klienci():
     """Pobiera listę wszystkich klientów."""
     try:
-        # Pamiętaj, że klienci są pobierani w RPC, ale to jest endpoint do listy filtrów
         klienci = supabase.table("klienci").select("*").execute()
         
         if klienci.data:
@@ -90,43 +112,35 @@ def dodaj_klienta():
     try:
         data = request.get_json()
         
-        # Wymagane pola
+        # Wymagane pola - teraz poprawnie szukamy 'klient_id'
         if 'klient_id' not in data or not data['klient_id']:
-            return jsonify({"error": "Pole 'id' jest wymagane."}), 400
+            return jsonify({"error": "Pole 'klient_id' jest wymagane."}), 400
             
-        # Pamiętaj, że ID klienta to klucz główny (PRIMARY KEY), musi być unikalne.
-        # Supabase zgłosi błąd, jeśli ID już istnieje.
-        
         result = supabase.table("klienci").insert(data).execute()
+        
+        # Komunikat sukcesu - teraz poprawnie używamy 'klient_id'
         return jsonify({"message": f"Dodano klienta: {data['klient_id']}"}), 201
 
     except APIError as ae:
-        # Błąd unikalności
+        # Obsługa błędu unikalności
         if 'duplicate key value violates unique constraint' in str(ae):
-            return jsonify({"error": "Klient o podanym ID już istnieje."}), 409
+            return jsonify({"error": "Klient o podanym ID lub innej unikalnej wartości już istnieje."}), 409
         print("Błąd POST /klienci (APIError):", traceback.format_exc())
         return jsonify({"error": f"Błąd Supabase: {str(ae)}"}), 500
     except Exception as e:
         print("Błąd POST /klienci:", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
-@app.route("/")
-def index():
-    """Sprawdzenie statusu API."""
-    return {"status": "ok", "message": "API działa"}
-
 # ----------------------------------------------------------------------
 # ENDPOINTY NAPRAW (CRUD)
 # ----------------------------------------------------------------------
 
-# === WYMAGANA FUNKCJA FORMATUJĄCA DANE ===
-# Ta funkcja musi być jedyną definicją formatującą naprawy!
+# === FUNKCJA FORMATUJĄCA DANE (Bez zmian) ===
 def _formatuj_naprawe(naprawa):
     """
     Formatowanie danych naprawy dla front-endu.
     Oczekuje płaskich kolumn od RPC, w tym 'maszyna_marka' i 'maszyna_klasa'.
     """
-    # Używamy płaskich kolumn z RPC (zdefiniowanych w SQL jako aliasy)
     marka = naprawa.get('maszyna_marka', 'Brak') 
     klasa = naprawa.get('maszyna_klasa', 'Brak')
     
@@ -135,7 +149,7 @@ def _formatuj_naprawe(naprawa):
         'klient_id': naprawa.get('klient_id', 'Brak'), 
         'maszyna_ns': naprawa.get('maszyna_ns', 'Brak'),
         
-        'marka': marka, # Wstawiamy pola relacji na tym samym poziomie
+        'marka': marka, 
         'klasa': klasa,
         
         'data_przyjecia': naprawa.get('data_przyjecia'),
@@ -151,14 +165,8 @@ def _formatuj_naprawe(naprawa):
 
 @app.route("/naprawy", methods=["GET"])
 def get_naprawy():
-    """
-    Pobiera naprawy, używając funkcji RPC w Supabase (get_naprawy_z_filtrami)
-    do bezpiecznego i stabilnego filtrowania, w tym na relacjach.
-    """
+    """Pobiera naprawy z filtrowaniem przez RPC."""
     try:
-        # 1. POPRAWIONO POBIERANIE PARAMETRÓW Z QUERY STRING
-        # Klucze z request.args.get() MUSZĄ być takie same jak te wysyłane przez front-end.
-        # Z Twojego front-endu wysyłasz klucze z podkreśleniem (np. '_klient_id')
         klient_filter = request.args.get('_klient_id')
         ns_filter = request.args.get('_maszyna_ns')
         marka_filter = request.args.get('_marka') 
@@ -166,7 +174,6 @@ def get_naprawy():
         status_filter = request.args.get('_status')
         usterka_filter = request.args.get('_opis_usterki')
         
-        # 2. Definicja argumentów dla funkcji RPC (Nazwy muszą pasować do SQL!)
         params = {
             "_klient_id": klient_filter,
             "_maszyna_ns": ns_filter,
@@ -176,12 +183,10 @@ def get_naprawy():
             "_opis_usterki": usterka_filter
         }
         
-        # Usuwamy puste wartości (None lub "")
         params_rpc = {k: v for k, v in params.items() if v}
         
         print(f"DEBUG API: Wywołanie RPC z filtrami: {params_rpc}")
         
-        # 3. Wywołanie funkcji RPC
         naprawy_resp = supabase.rpc(
             'get_naprawy_z_filtrami', 
             params=params_rpc
@@ -189,7 +194,6 @@ def get_naprawy():
 
         naprawy = naprawy_resp.data
 
-        # 4. Formatowanie i zwrócenie danych
         wynik = [_formatuj_naprawe(n) for n in naprawy]
         return jsonify(wynik)
         
@@ -199,14 +203,8 @@ def get_naprawy():
 
 @app.route("/naprawy/<int:naprawa_id>", methods=["GET"])
 def get_naprawa_by_id(naprawa_id):
-    """
-    Pobiera pojedynczą naprawę po ID, zwracając spłaszczone dane z marką i klasą.
-    Naprawia błąd 405 podczas próby edycji.
-    """
+    """Pobiera pojedynczą naprawę po ID (dla edycji)."""
     try:
-        # Pobieramy naprawę i łączymy z maszyną w jednym zapytaniu Supabase,
-        # co jest wydajniejsze niż łączenie danych ręcznie.
-        # Używamy select z relacją ('maszyny(marka,klasa)').
         naprawa_resp = supabase.table("naprawy").select(
             "*, maszyny(marka, klasa)" 
         ).eq("id", naprawa_id).single().execute()
@@ -216,12 +214,10 @@ def get_naprawa_by_id(naprawa_id):
         if not naprawa_data:
             return jsonify({"error": "Naprawa nie została znaleziona"}), 404
         
-        # Wyodrębnienie danych maszyny
         maszyna_dane = naprawa_data.pop("maszyny", {})
         
-        # Formatowanie wyniku, aby był płaski, jak oczekuje front-end (dla edycji)
         wynik = {
-            **naprawa_data, # Kopiowanie wszystkich pól z tabeli naprawy
+            **naprawa_data, 
             "marka": maszyna_dane.get("marka", "Brak"),
             "klasa": maszyna_dane.get("klasa", "Brak"),
         }
@@ -229,15 +225,48 @@ def get_naprawa_by_id(naprawa_id):
         return jsonify(wynik)
         
     except Exception as e:
-        # Obsługa błędu gdy single() nie znajduje rekordu
         if "No rows returned from the query" in str(e) or (hasattr(e, 'code') and e.code == 'PGRST116'):
             return jsonify({"error": "Naprawa nie została znaleziona"}), 404
             
         print(f"Błąd w /naprawy/{naprawa_id} (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
-@app.route("/naprawy/<int:naprawa_id>", methods=["POST"])
-# ... (rest of the endpoints: dodaj_naprawe, delete_naprawa, update_naprawa, maszyny, klienci) ...
+### ⚠️ POPRAWKA: BRAKUJĄCE ENDPOINTY (Wstaw przykłady dla PUT/POST/DELETE, jeśli są używane)
+# ZAKŁADAM, ŻE UŻYWASZ POST DO DODAWANIA NOWEJ NAPRAWY
+@app.route("/naprawy", methods=["POST"])
+def dodaj_naprawe():
+    """Dodaje nową naprawę."""
+    data = request.get_json()
+    try:
+        # Supabase automatycznie obsługuje klucze obce, jeśli dane są poprawne
+        result = supabase.table("naprawy").insert(data).execute()
+        
+        if result.data:
+            # Zwracamy nowo dodany rekord
+            return jsonify(result.data[0]), 201
+        else:
+            return jsonify({"error": "Błąd podczas dodawania naprawy."}), 500
+
+    except Exception as e:
+        print("Błąd w dodaj_naprawe (POST):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera (POST /naprawy): {str(e)}"}), 500
+
+# ZAKŁADAM, ŻE UŻYWASZ DELETE DO USUWANIA NAPRAWY
+@app.route("/naprawy/<int:naprawa_id>", methods=["DELETE"])
+def delete_naprawa(naprawa_id):
+    """Usuwa naprawę."""
+    try:
+        result = supabase.table("naprawy").delete().eq("id", naprawa_id).execute()
+        
+        if result.data:
+            return jsonify({"message": f"Usunięto naprawę o ID: {naprawa_id}"})
+        else:
+            return jsonify({"error": "Nie znaleziono naprawy o podanym ID."}), 404
+            
+    except Exception as e:
+        print("Błąd w delete_naprawa (DELETE):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera (DELETE /naprawy): {str(e)}"}), 500
+
 
 @app.route("/naprawy/<int:naprawa_id>", methods=["PUT"])
 def update_naprawa(naprawa_id):
@@ -258,7 +287,6 @@ def update_naprawa(naprawa_id):
         return jsonify({"error": "Brak danych do aktualizacji"}), 400
 
     try:
-        # Wykonaj aktualizację tylko dla przekazanych pól
         result = supabase.table("naprawy").update(pola_do_aktualizacji).eq("id", naprawa_id).execute()
 
         if result.data:
@@ -269,10 +297,10 @@ def update_naprawa(naprawa_id):
     except Exception as e:
         print("Błąd w update_naprawa (PUT):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera (PUT /naprawy): {str(e)}"}), 500
-        
-# ... (pozostały kod endpointów /maszyny i /klienci jest poprawny) ...
-# Pamiętaj o usunięciu duplikatu funkcji _formatuj_naprawe z oryginalnego kodu!
 
+# ======================================================================
+# URUCHOMIENIE APLIKACJI
+# ======================================================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
