@@ -87,6 +87,36 @@ def get_maszyna_by_id(maszyna_ns_str):
         print(f"Błąd w /maszyny/{maszyna_ns_str} (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
+@app.route("/maszyny", methods=["POST"])
+def upsert_maszyna():
+    """
+    Dodaje lub aktualizuje maszynę (UPSERT) na podstawie maszyna_ns.
+    W Supabase domyślnie używa metody POST i opcji on_conflict.
+    """
+    try:
+        data = request.get_json()
+        
+        # Wymagane pola
+        if 'maszyna_ns' not in data or not data['maszyna_ns']:
+            return jsonify({"error": "Pole 'maszyna_ns' jest wymagane."}), 400
+        
+        # Wykonanie UPSERT: dodaj lub zaktualizuj na podstawie maszyna_ns
+        # Kolumna 'maszyna_ns' musi być kluczem unikalnym (Primary Key lub Unique Constraint)
+        result = supabase.table("maszyny").upsert(
+            data,
+            on_conflict="maszyna_ns" 
+        ).execute()
+        
+        if result.data:
+            # Zwracamy zaktualizowany lub dodany rekord
+            return jsonify(result.data[0]), 200
+        else:
+            return jsonify({"error": "Błąd podczas dodawania/aktualizacji maszyny."}), 500
+
+    except Exception as e:
+        print("Błąd POST /maszyny (UPSERT):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera (POST /maszyny): {str(e)}"}), 500
+
 # ----------------------------------------------------------------------
 # ENDPOINTY KLIENTÓW
 # ----------------------------------------------------------------------
