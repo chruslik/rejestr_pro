@@ -68,19 +68,22 @@ def get_maszyny():
 
 @app.route("/maszyny/<string:maszyna_ns_str>", methods=["GET"])
 def get_maszyna_by_id(maszyna_ns_str):
-    """Pobiera pojedynczą maszynę po numerze seryjnym (maszyna_ns)."""
+    """Pobiera pojedynczą maszynę po numerze seryjnym (maszyna_ns) - case-insensitive."""
     try:
-        # Uwaga: dla numerów seryjnych najlepiej wymagać dokładnego dopasowania
-        maszyna_resp = supabase.table("maszyny").select("*").eq("maszyna_ns", maszyna_ns_str).single().execute()
+        # 🟢 POPRAWKA: Używamy ilike do wyszukiwania bez wrażliwości na wielkość liter
+        # Używamy limit(1) zamiast single(), aby uniknąć wyjątku, gdy brak wyniku
+        maszyna_resp = supabase.table("maszyny").select("*").ilike("maszyna_ns", maszyna_ns_str).limit(1).execute()
         
-        maszyna_data = maszyna_resp.data
+        maszyna_data = maszyna_resp.data[0] if maszyna_resp.data else None
+        
         if not maszyna_data:
             return jsonify({"error": "Maszyna nie została znaleziona"}), 404
         
+        # Zwracamy znaleziony rekord z oryginalną wielkością liter z bazy
         return jsonify(maszyna_data)
         
     except Exception as e:
-        # Obsługa błędu gdy single() nie znajduje rekordu (404)
+        # Obsługa błędu gdy nie znajduje rekordu (404)
         if "No rows returned from the query" in str(e) or (hasattr(e, 'code') and e.code == 'PGRST116'):
             return jsonify({"error": "Maszyna nie została znaleziona"}), 404
             
@@ -91,7 +94,7 @@ def get_maszyna_by_id(maszyna_ns_str):
 def upsert_maszyna():
     """
     Dodaje lub aktualizuje maszynę (UPSERT) na podstawie maszyna_ns.
-    W Supabase domyślnie używa metody POST i opcji on_conflict.
+    Zachowuje wielkość liter zapisaną przez klienta.
     """
     try:
         data = request.get_json()
@@ -100,8 +103,8 @@ def upsert_maszyna():
         if 'maszyna_ns' not in data or not data['maszyna_ns']:
             return jsonify({"error": "Pole 'maszyna_ns' jest wymagane."}), 400
         
-        # Wykonanie UPSERT: dodaj lub zaktualizuj na podstawie maszyna_ns
-        # Kolumna 'maszyna_ns' musi być kluczem unikalnym (Primary Key lub Unique Constraint)
+        # 🟢 UWAGA: UPSERT jest case-sensitive na kluczu `maszyna_ns`, chyba że użyjesz citext w bazie.
+        # Wysłany NS (np. AB60D) zostanie użyty do zapisu lub aktualizacji
         result = supabase.table("maszyny").upsert(
             data,
             on_conflict="maszyna_ns" 
@@ -135,48 +138,25 @@ def get_klienci():
         print("Błąd GET /klienci:", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera (GET /klienci): {str(e)}"}), 500
 
-# 🟢 NOWY, BRAKUJĄCY ENDPOINT
 @app.route("/klienci/<string:klient_id_str>", methods=["GET"])
 def get_klient_by_id(klient_id_str):
     """
-    Pobiera pojedynczego klienta po ID.
-    Używa zapytania bez wrażliwości na wielkość liter (ILIKE/LOWER) 
-    dla większej tolerancji na dane.
+    Pobiera pojedynczego klienta po ID, używając bezwrażliwego na wielkość liter wyszukiwania (ILIKE).
     """
     try:
-        # Jeśli masz skonfigurowany operator ILIKE (np. .ilike) użyj go,
-        # jeśli nie, najbezpieczniej jest wysłać znormalizowaną wartość.
-        # W Supabase i PostgREST, jeśli kolumna jest ustawiona z indeksem case-insensitive,
-        # .eq() może działać. Jeśli nie, musimy upewnić się, że wyszukiwanie zadziała.
+        # 🟢 POPRAWKA: Używamy ilike do wyszukiwania bez wrażliwości na wielkość liter
+        klient_resp = supabase.table("klienci").select("*").ilike("klient_id", klient_id_str).limit(1).execute()
         
-        # Opcja 1: Użycie .eq() z normalizacją na małe litery, jeśli baza ma spójność:
-        # klient_id_lower = klient_id_str.lower()
-        # klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_lower).single().execute()
-
-        # Opcja 2 (Najbezpieczniejsza, wymaga włączenia operatorów tekstowych w Supabase):
-        # Wyszukujemy po kolumnie 'klient_id' używając operatora 'eq'
-        # Klient desktopowy wysyła już "Seco" lub "seco", a serwer musi się dopasować.
+        klient_data = klient_resp.data[0] if klient_resp.data else None
         
-        # Testujemy, czy w bazie jest ID z zachowaniem wielkości liter
-        klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_str).single().execute()
-        
-        # W przypadku, gdy klient wysyła "seco", a w bazie jest "Seco" (lub odwrotnie), 
-        # a baza jest case-sensitive, możemy dodać drugą próbę z normalizacją:
-        if not klient_resp.data and klient_id_str != klient_id_str.lower():
-             try:
-                 # Druga próba, wyszukujemy znormalizowaną (małe litery) wartość, zakładając spójność w bazie
-                 klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_str.lower()).single().execute()
-             except Exception:
-                 pass # Ignorujemy błąd drugiej próby
-
-        klient_data = klient_resp.data
         if not klient_data:
             return jsonify({"error": "Klient nie został znaleziony"}), 404
             
+        # Zwracamy znaleziony rekord z oryginalną wielkością liter z bazy
         return jsonify(klient_data), 200
         
     except Exception as e:
-        # Obsługa błędu gdy single() nie znajduje rekordu (404)
+        # Obsługa błędu gdy nie znajduje rekordu (404)
         if "No rows returned from the query" in str(e) or (hasattr(e, 'code') and e.code == 'PGRST116'):
             return jsonify({"error": "Klient nie został znaleziony"}), 404
             
@@ -186,19 +166,14 @@ def get_klient_by_id(klient_id_str):
 
 @app.route("/klienci", methods=["POST"])
 def dodaj_klienta():
-    """Dodaje nowego klienta."""
+    """Dodaje nowego klienta, zachowując wielkość liter."""
     try:
         data = request.get_json()
         
         if 'klient_id' not in data or not data['klient_id']:
             return jsonify({"error": "Pole 'klient_id' jest wymagane."}), 400
-            
-        # 🟢 Wprowadzamy normalizację na małe litery przed zapisem (dobra praktyka w bazie)
-        # Choć w Twoim przypadku klienci mają wielkie litery, ta linia może wymagać
-        # dostosowania lub usunięcia, jeśli chcesz zachować Case-Sensitivity w bazie.
-        # Na razie pozostawiamy bez normalizacji, aby zachować Twoje dane.
-        # Jeśli chciałbyś normalizować, dodaj: data['klient_id'] = data['klient_id'].lower()
         
+        # Zapisujemy ID klienta z wielkością liter wysłaną przez klienta (np. "Seco")
         result = supabase.table("klienci").insert(data).execute()
         
         return jsonify({"message": f"Dodano klienta: {data['klient_id']}"}), 201
@@ -227,6 +202,7 @@ def _formatuj_naprawe(naprawa):
     
     return {
         'id': naprawa.get('id'),
+        # ZACHOWUJEMY WIELKOŚĆ LITER Z BAZY
         'klient_id': naprawa.get('klient_id', 'Brak'), 
         'maszyna_ns': naprawa.get('maszyna_ns', 'Brak'),
         
@@ -248,6 +224,8 @@ def _formatuj_naprawe(naprawa):
 def get_naprawy():
     """Pobiera naprawy z filtrowaniem przez RPC."""
     try:
+        # Wartości filtrów są wysyłane jako case-sensitive,
+        # ale funkcja SQL musi użyć ILIKE, aby działało bezwrażliwie.
         klient_filter = request.args.get('_klient_id')
         ns_filter = request.args.get('_maszyna_ns')
         marka_filter = request.args.get('_marka') 
@@ -261,6 +239,7 @@ def get_naprawy():
             "_marka": marka_filter,
             "_klasa": klasa_filter,
             "_status": status_filter,
+            # Usterka jest domyślnie normalizowana do małych liter na frontendzie
             "_opis_usterki": usterka_filter
         }
         
@@ -299,6 +278,7 @@ def get_naprawa_by_id(naprawa_id):
         
         wynik = {
             **naprawa_data, 
+            # ZACHOWUJEMY WIELKOŚĆ LITER Z BAZY
             "marka": maszyna_dane.get("marka", "Brak"),
             "klasa": maszyna_dane.get("klasa", "Brak"),
         }
@@ -314,9 +294,10 @@ def get_naprawa_by_id(naprawa_id):
 
 @app.route("/naprawy", methods=["POST"])
 def dodaj_naprawe():
-    """Dodaje nową naprawę."""
+    """Dodaje nową naprawę, zachowując wielkość liter dla ID, NS, Marki, Klasy."""
     data = request.get_json()
     try:
+        # Dane są już oczyszczone i sformatowane z zachowaniem wielkości liter na frontendzie
         result = supabase.table("naprawy").insert(data).execute()
         
         if result.data:
@@ -351,6 +332,7 @@ def update_naprawa(naprawa_id):
 
     pola_do_aktualizacji = {}
     
+    # Dane te zostaną zapisane z zachowaniem wielkości liter
     pola_naprawy = ["status", "data_zakonczenia", "opis_usterki", "opis_naprawy", 
                     "posrednik_id", "rozliczone", "klient_id", "maszyna_ns", "data_przyjecia"]
 
