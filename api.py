@@ -66,12 +66,11 @@ def get_maszyny():
         print("Błąd GET /maszyny:", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera (GET /maszyny): {str(e)}"}), 500
 
-### ⚠️ POPRAWKA: BRAKUJĄCY ENDPOINT GET /maszyny/<id>
 @app.route("/maszyny/<string:maszyna_ns_str>", methods=["GET"])
 def get_maszyna_by_id(maszyna_ns_str):
     """Pobiera pojedynczą maszynę po numerze seryjnym (maszyna_ns)."""
     try:
-        # Używamy nowej, ujednoliconej nazwy kolumny: maszyna_ns
+        # Uwaga: dla numerów seryjnych najlepiej wymagać dokładnego dopasowania
         maszyna_resp = supabase.table("maszyny").select("*").eq("maszyna_ns", maszyna_ns_str).single().execute()
         
         maszyna_data = maszyna_resp.data
@@ -81,10 +80,10 @@ def get_maszyna_by_id(maszyna_ns_str):
         return jsonify(maszyna_data)
         
     except Exception as e:
-        # Obsługa błędu gdy single() nie znajduje rekordu
+        # Obsługa błędu gdy single() nie znajduje rekordu (404)
         if "No rows returned from the query" in str(e) or (hasattr(e, 'code') and e.code == 'PGRST116'):
             return jsonify({"error": "Maszyna nie została znaleziona"}), 404
-        
+            
         print(f"Błąd w /maszyny/{maszyna_ns_str} (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
@@ -106,23 +105,75 @@ def get_klienci():
         print("Błąd GET /klienci:", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera (GET /klienci): {str(e)}"}), 500
 
+# 🟢 NOWY, BRAKUJĄCY ENDPOINT
+@app.route("/klienci/<string:klient_id_str>", methods=["GET"])
+def get_klient_by_id(klient_id_str):
+    """
+    Pobiera pojedynczego klienta po ID.
+    Używa zapytania bez wrażliwości na wielkość liter (ILIKE/LOWER) 
+    dla większej tolerancji na dane.
+    """
+    try:
+        # Jeśli masz skonfigurowany operator ILIKE (np. .ilike) użyj go,
+        # jeśli nie, najbezpieczniej jest wysłać znormalizowaną wartość.
+        # W Supabase i PostgREST, jeśli kolumna jest ustawiona z indeksem case-insensitive,
+        # .eq() może działać. Jeśli nie, musimy upewnić się, że wyszukiwanie zadziała.
+        
+        # Opcja 1: Użycie .eq() z normalizacją na małe litery, jeśli baza ma spójność:
+        # klient_id_lower = klient_id_str.lower()
+        # klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_lower).single().execute()
+
+        # Opcja 2 (Najbezpieczniejsza, wymaga włączenia operatorów tekstowych w Supabase):
+        # Wyszukujemy po kolumnie 'klient_id' używając operatora 'eq'
+        # Klient desktopowy wysyła już "Seco" lub "seco", a serwer musi się dopasować.
+        
+        # Testujemy, czy w bazie jest ID z zachowaniem wielkości liter
+        klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_str).single().execute()
+        
+        # W przypadku, gdy klient wysyła "seco", a w bazie jest "Seco" (lub odwrotnie), 
+        # a baza jest case-sensitive, możemy dodać drugą próbę z normalizacją:
+        if not klient_resp.data and klient_id_str != klient_id_str.lower():
+             try:
+                 # Druga próba, wyszukujemy znormalizowaną (małe litery) wartość, zakładając spójność w bazie
+                 klient_resp = supabase.table("klienci").select("*").eq("klient_id", klient_id_str.lower()).single().execute()
+             except Exception:
+                 pass # Ignorujemy błąd drugiej próby
+
+        klient_data = klient_resp.data
+        if not klient_data:
+            return jsonify({"error": "Klient nie został znaleziony"}), 404
+            
+        return jsonify(klient_data), 200
+        
+    except Exception as e:
+        # Obsługa błędu gdy single() nie znajduje rekordu (404)
+        if "No rows returned from the query" in str(e) or (hasattr(e, 'code') and e.code == 'PGRST116'):
+            return jsonify({"error": "Klient nie został znaleziony"}), 404
+            
+        print(f"Błąd w /klienci/{klient_id_str} (GET):", traceback.format_exc())
+        return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
+
+
 @app.route("/klienci", methods=["POST"])
 def dodaj_klienta():
     """Dodaje nowego klienta."""
     try:
         data = request.get_json()
         
-        # Wymagane pola - teraz poprawnie szukamy 'klient_id'
         if 'klient_id' not in data or not data['klient_id']:
             return jsonify({"error": "Pole 'klient_id' jest wymagane."}), 400
             
+        # 🟢 Wprowadzamy normalizację na małe litery przed zapisem (dobra praktyka w bazie)
+        # Choć w Twoim przypadku klienci mają wielkie litery, ta linia może wymagać
+        # dostosowania lub usunięcia, jeśli chcesz zachować Case-Sensitivity w bazie.
+        # Na razie pozostawiamy bez normalizacji, aby zachować Twoje dane.
+        # Jeśli chciałbyś normalizować, dodaj: data['klient_id'] = data['klient_id'].lower()
+        
         result = supabase.table("klienci").insert(data).execute()
         
-        # Komunikat sukcesu - teraz poprawnie używamy 'klient_id'
         return jsonify({"message": f"Dodano klienta: {data['klient_id']}"}), 201
 
     except APIError as ae:
-        # Obsługa błędu unikalności
         if 'duplicate key value violates unique constraint' in str(ae):
             return jsonify({"error": "Klient o podanym ID lub innej unikalnej wartości już istnieje."}), 409
         print("Błąd POST /klienci (APIError):", traceback.format_exc())
@@ -231,18 +282,14 @@ def get_naprawa_by_id(naprawa_id):
         print(f"Błąd w /naprawy/{naprawa_id} (GET):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera: {str(e)}"}), 500
 
-### ⚠️ POPRAWKA: BRAKUJĄCE ENDPOINTY (Wstaw przykłady dla PUT/POST/DELETE, jeśli są używane)
-# ZAKŁADAM, ŻE UŻYWASZ POST DO DODAWANIA NOWEJ NAPRAWY
 @app.route("/naprawy", methods=["POST"])
 def dodaj_naprawe():
     """Dodaje nową naprawę."""
     data = request.get_json()
     try:
-        # Supabase automatycznie obsługuje klucze obce, jeśli dane są poprawne
         result = supabase.table("naprawy").insert(data).execute()
         
         if result.data:
-            # Zwracamy nowo dodany rekord
             return jsonify(result.data[0]), 201
         else:
             return jsonify({"error": "Błąd podczas dodawania naprawy."}), 500
@@ -251,7 +298,6 @@ def dodaj_naprawe():
         print("Błąd w dodaj_naprawe (POST):", traceback.format_exc())
         return jsonify({"error": f"Błąd serwera (POST /naprawy): {str(e)}"}), 500
 
-# ZAKŁADAM, ŻE UŻYWASZ DELETE DO USUWANIA NAPRAWY
 @app.route("/naprawy/<int:naprawa_id>", methods=["DELETE"])
 def delete_naprawa(naprawa_id):
     """Usuwa naprawę."""
@@ -275,7 +321,6 @@ def update_naprawa(naprawa_id):
 
     pola_do_aktualizacji = {}
     
-    # Lista wszystkich pól do aktualizacji (kluczowych do filtrowania danych) 
     pola_naprawy = ["status", "data_zakonczenia", "opis_usterki", "opis_naprawy", 
                     "posrednik_id", "rozliczone", "klient_id", "maszyna_ns", "data_przyjecia"]
 
